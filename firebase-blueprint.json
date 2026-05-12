@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user data and clearance levels.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "points": { "type": "number" },
+        "clearance": { "type": "number" },
+        "reputation": {
+          "type": "object",
+          "properties": {
+            "positive": { "type": "number" },
+            "negative": { "type": "number" }
+          }
+        },
+        "profile": { "type": "object" }
+      },
+      "required": ["id", "points", "clearance"]
+    },
+    "OracleThread": {
+      "title": "Oracle Thread",
+      "description": "Asynchronous communication threads.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authorId": { "type": "string" },
+        "question": { "type": "string" },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "authorId": { "type": "string" },
+              "text": { "type": "string" },
+              "timestamp": { "type": "number" },
+              "vouchCount": { "type": "number" }
+            }
+          }
+        },
+        "bounty": { "type": "number" },
+        "timestamp": { "type": "number" },
+        "isResolved": { "type": "boolean" },
+        "tags": { "type": "array" }
+      },
+      "required": ["id", "authorId", "question", "timestamp"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and stats."
+    },
+    "oracle_threads/{threadId}": {
+      "schema": "OracleThread",
+      "description": "Shared oracle threads with bounties and community answers."
+    },
+    "network_stats/global": {
+      "schema": "object",
+      "description": "Global stats like decryption progress."
+    }
+  }
+}

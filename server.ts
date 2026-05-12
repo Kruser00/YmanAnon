@@ -4,8 +4,18 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
-
+import admin from 'firebase-admin';
+import { getFirestore } from 'firebase-admin/firestore';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { readFileSync } from "fs";
+const firebaseConfig = JSON.parse(readFileSync(path.join(__dirname, "src", "firebase-applet-config.json"), "utf-8"));
+
+// Initialize Firebase Admin
+const adminApp = admin.initializeApp({
+  projectId: firebaseConfig.projectId,
+});
+
+const db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
 
 async function startServer() {
   const app = express();
@@ -16,18 +26,12 @@ async function startServer() {
     cors: { origin: '*' }
   });
 
-  // State
+  // Local Matchmaking State (Ephemeral)
   let queue: any[] = [];
   const activeChats = new Map<string, any>();
   const users = new Map<string, any>();
   
-  // Oracle State
-  const oracleThreads: Array<{id: string, question: string, authorId: string, answers: Array<{id: string, authorId: string, text: string, timestamp: number}>, timestamp: number}> = [
-    { id: 't1', question: "What made you emotionally mature?", authorId: 'sys', answers: [], timestamp: Date.now() - 100000 },
-    { id: 't2', question: "What is a regret you carry every day?", authorId: 'sys', answers: [], timestamp: Date.now() - 50000 }
-  ];
-
-  // Atmosphere State
+  // Atmosphere Mock (Can stay in memory for high-frequency updates, or move to FS)
   const globalMoods = {
     lonely: 10, curious: 15, bored: 5, anxious: 20, thoughtful: 30, energetic: 2, happy: 8
   };
@@ -77,6 +81,10 @@ async function startServer() {
     console.log('[DEBUG] User connected', socket.id);
     const uID = socket.id;
 
+    // Proactively send atmosphere data on connection
+    io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
+    socket.emit('atmosphere_data', { moods: globalMoods, online: io.engine.clientsCount });
+
     const terminateChat = (roomId: string, leaverId: string) => {
       const room = activeChats.get(roomId);
       if (!room) return;
@@ -114,6 +122,7 @@ async function startServer() {
         terminateChat(user.currentRoom, uID);
       }
       users.delete(uID);
+      io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
     });
 
     socket.on('leave_pool', () => {
@@ -172,61 +181,165 @@ async function startServer() {
        socket.emit('atmosphere_data', { moods: globalMoods, online: users.size }); 
     });
 
-    socket.on('request_oracle', () => {
-       socket.emit('oracle_data', oracleThreads.map(t => ({
-          id: t.id,
-          question: t.question,
-          answersCount: t.answers.length,
-          answers: t.answers,
-          timestamp: t.timestamp,
-          isPremium: (t as any).isPremium || false
-       })));
-    });
-
-    socket.on('post_oracle_thread', (data) => {
-       const u = users.get(uID) || { id: uID, clearance: 1 };
-       const newThread = {
-          id: 't' + Date.now(),
-          question: data.question,
-          authorId: uID,
-          answers: [],
-          timestamp: Date.now(),
-          isPremium: (u.clearance || 1) > 1
-       };
-       oracleThreads.unshift(newThread);
-       if (oracleThreads.length > 50) oracleThreads.pop();
-       io.emit('oracle_updated');
-    });
-
-    socket.on('post_oracle_answer', (data) => {
-       const thread = oracleThreads.find(t => t.id === data.threadId);
-       if (thread) {
-          thread.answers.push({
-             id: 'a' + Date.now(),
-             authorId: uID,
-             text: data.text,
-             timestamp: Date.now()
-          });
-          io.emit('oracle_updated');
+    socket.on('request_oracle', async () => {
+       try {
+         const snapshot = await db.collection('oracle_threads')
+           .orderBy('isResolved', 'asc') // Active first
+           .orderBy('bounty', 'desc') 
+           .orderBy('timestamp', 'desc')
+           .limit(40).get();
+         const threads = snapshot.docs.map(doc => ({
+           id: doc.id,
+           ...doc.data()
+         }));
+         socket.emit('oracle_data', threads);
+       } catch (error) {
+         console.error('[ORACLE] Error fetching threads:', error);
        }
     });
 
-    socket.on('join_pool', (data) => {
+    socket.on('post_oracle_thread', async (data) => {
+       try {
+         const actualUID = data.nodeId || uID;
+         const bountyAmount = data.bounty || 0;
+         
+         // 1. Check points if bounty is requested
+         if (bountyAmount > 0) {
+            const userRef = db.collection('users').doc(actualUID);
+            const userSnap = await userRef.get();
+            if (!userSnap.exists || (userSnap.data()?.points || 0) < bountyAmount) {
+               socket.emit('system_message', { text: "!! INSUFFICIENT FUNDS FOR BOUNTY_STAKING !!" });
+               return;
+            }
+            await userRef.update({ points: admin.firestore.FieldValue.increment(-bountyAmount) });
+         }
+
+         const newThread = {
+            authorId: actualUID,
+            question: data.question,
+            answers: [],
+            timestamp: Date.now(),
+            bounty: bountyAmount,
+            isResolved: false
+         };
+         await db.collection('oracle_threads').add(newThread);
+         io.emit('oracle_updated');
+       } catch (error) {
+         console.error('[ORACLE] Error posting thread:', error);
+       }
+    });
+
+    socket.on('post_oracle_answer', async (data) => {
+       try {
+         const actualUID = data.nodeId || uID;
+         const threadRef = db.collection('oracle_threads').doc(data.threadId);
+         await db.runTransaction(async (t) => {
+           const doc = await t.get(threadRef);
+           if (!doc.exists) return;
+           const thread = doc.data();
+           const answers = thread?.answers || [];
+           answers.push({
+              id: 'a' + Date.now(),
+              authorId: actualUID,
+              text: data.text,
+              timestamp: Date.now(),
+              vouchCount: 0
+           });
+           // Re-sort answers by vouchCount immediately
+           answers.sort((a: any, b: any) => (b.vouchCount || 0) - (a.vouchCount || 0));
+           t.update(threadRef, { answers });
+         });
+         io.emit('oracle_updated');
+       } catch (error) {
+         console.error('[ORACLE] Error posting answer:', error);
+       }
+    });
+
+    socket.on('vouch_answer', async (data) => {
+       try {
+         const threadRef = db.collection('oracle_threads').doc(data.threadId);
+         await db.runTransaction(async (t) => {
+           const doc = await t.get(threadRef);
+           if (!doc.exists) return;
+           const thread = doc.data();
+           const answers = thread?.answers || [];
+           const answerIdx = answers.findIndex((a: any) => a.id === data.answerId);
+           if (answerIdx > -1) {
+              const answer = answers[answerIdx];
+              answer.vouchCount = (answer.vouchCount || 0) + 1;
+              
+              // AWARD REPUTATION TO AUTHOR
+              const authorRef = db.collection('users').doc(answer.authorId);
+              t.update(authorRef, { 'reputation.positive': admin.firestore.FieldValue.increment(1) });
+              
+              // Re-sort
+              answers.sort((a: any, b: any) => (b.vouchCount || 0) - (a.vouchCount || 0));
+              t.update(threadRef, { answers });
+           }
+         });
+         io.emit('oracle_updated');
+       } catch (error) {
+         console.error('[ORACLE] Error vouching:', error);
+       }
+    });
+
+    socket.on('resolve_thread', async (data) => {
+       try {
+         const threadRef = db.collection('oracle_threads').doc(data.threadId);
+         const threadSnap = await threadRef.get();
+         if (!threadSnap.exists || threadSnap.data()?.authorId !== data.nodeId) return;
+
+         const threadData = threadSnap.data();
+         const bounty = threadData?.bounty || 0;
+         const answers = threadData?.answers || [];
+         
+         // 1. Find winner (highest vouchCount)
+         if (bounty > 0 && answers.length > 0) {
+            const winner = answers[0]; // Already sorted by vouchCount on post/vouch
+            if (winner && winner.authorId) {
+               const winnerRef = db.collection('users').doc(winner.authorId);
+               await winnerRef.update({ points: admin.firestore.FieldValue.increment(bounty) });
+            }
+         }
+
+         await threadRef.update({ isResolved: true });
+         io.emit('oracle_updated');
+       } catch (error) {
+         console.error('[ORACLE] Error resolving:', error);
+       }
+    });
+
+    socket.on('join_pool', async (data) => {
+      const actualUID = data.nodeId || uID;
+      
+      // Sync or Create user in Firestore
+      const userRef = db.collection('users').doc(actualUID);
+      const userSnap = await userRef.get();
+      if (!userSnap.exists) {
+        await userRef.set({
+          id: actualUID,
+          points: 1000,
+          clearance: 1,
+          reputation: { positive: 0, negative: 0 },
+          profile: data.profile || {}
+        });
+      }
+
       // Update global moods tally
       if (data.mood && globalMoods[data.mood as keyof typeof globalMoods] !== undefined) {
          globalMoods[data.mood as keyof typeof globalMoods]++;
-         io.emit('atmosphere_updated', { moods: globalMoods, online: users.size + 1 });
+         io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
       }
 
+      const userData = userSnap.exists ? userSnap.data() : { id: actualUID, points: 1000, clearance: 1, reputation: { positive: 0, negative: 0 } };
+
       users.set(uID, { 
-         id: uID, 
+         ...userData,
          mood: data.mood, 
          intent: data.intent, 
          profile: data.profile, 
-         points: 1000, 
-         clearance: 1,
-         reputation: { positive: 0, negative: 0 },
-         currentRoom: null 
+         currentRoom: null,
+         nodeId: actualUID
       });
       syncUserState(uID);
       
@@ -261,6 +374,38 @@ async function startServer() {
       } else {
         queue.push({ id: uID, ...data });
         console.log(`[DEBUG] User added to queue: ${uID}`);
+      }
+    });
+
+    socket.on('boost_message', async (data) => {
+      try {
+        const costMap: Record<string, number> = { 'highlight': 50, 'glitch': 150, 'redact': 200 };
+        const cost = costMap[data.type] || 0;
+        const actualUID = data.nodeId || uID;
+
+        const userRef = db.collection('users').doc(actualUID);
+        const userSnap = await userRef.get();
+        if (!userSnap.exists || (userSnap.data()?.points || 0) < cost) {
+           socket.emit('system_message', { text: "!! INSUFFICIENT POINTS FOR SIGNAL_BOOST !!" });
+           return;
+        }
+
+        await userRef.update({ points: admin.firestore.FieldValue.increment(-cost) });
+        
+        // Broadcast the boost to the room
+        const user = users.get(uID);
+        if (user && user.currentRoom) {
+           io.to(user.currentRoom).emit('message_updated', { 
+             messageId: data.messageId, 
+             boost: data.type 
+           });
+           
+           // Sync user points back to socket state
+           user.points = (userSnap.data()?.points || cost) - cost;
+           syncUserState(uID);
+        }
+      } catch (e) {
+        console.error('[BOOST] error:', e);
       }
     });
 

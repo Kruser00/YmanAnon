@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['id', 'points', 'clearance', 'reputation'])
+          && data.id == userId
+          && data.points is number
+          && data.clearance is number
+          && data.reputation is map;
+      }
+
+      allow get: if isSignedIn();
+      allow list: if false; 
+      
+      allow create: if isOwner(userId) 
+        && isValidUser(request.resource.data)
+        && request.resource.data.points == 1000
+        && request.resource.data.clearance == 1;
+
+      allow update: if isOwner(userId)
+        && isValidUser(request.resource.data)
+        && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['points', 'clearance', 'reputation'])
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profile'])
+        );
+    }
+
+    // --- Oracle Threads ---
+    match /oracle_threads/{threadId} {
+      function isValidThread(data) {
+        return data.keys().hasAll(['id', 'authorId', 'question', 'timestamp'])
+          && data.authorId == request.auth.uid
+          && data.question is string 
+          && data.question.size() <= 500
+          && (!('bounty' in data) || (data.bounty is number && data.bounty >= 0));
+      }
+
+      allow read: if isSignedIn();
+      
+      allow create: if isSignedIn() 
+        && isValidId(threadId)
+        && isValidThread(request.resource.data)
+        && request.resource.data.timestamp == request.time.toMillis();
+      
+      allow update: if isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'isResolved'])
+        && (
+          // Adding an answer
+          (request.resource.data.answers.size() > resource.data.answers.size())
+          || 
+          // Resolving (only by author)
+          (resource.data.authorId == request.auth.uid && request.resource.data.isResolved == true)
+        );
+    }
+
+    // --- Network Stats ---
+    match /network_stats/global {
+      allow read: if true;
+    }
+  }
+}
