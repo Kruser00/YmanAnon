@@ -59,7 +59,7 @@ export default function App() {
   };
 
   return (
-    <div className="crt-screen">
+    <div className="crt-screen h-screen w-screen">
       <BackgroundCode />
       <div className="absolute inset-0 p-4 sm:p-8 flex flex-col pointer-events-auto z-10">
         {/* Header HUD */}
@@ -163,7 +163,7 @@ function BackgroundCode() {
   );
 }
 
-function BootSequence({ onComplete }: { onComplete: () => void }) {
+function BootSequence({ onComplete }: { key?: string, onComplete: () => void }) {
   useEffect(() => {
     const timer = setTimeout(onComplete, 2500);
     return () => clearTimeout(timer);
@@ -192,7 +192,7 @@ function BootSequence({ onComplete }: { onComplete: () => void }) {
   );
 }
 
-function SelectionScreen({ title, subtitle, options, onSelect }: { title: string; subtitle: string; options: string[]; onSelect: (val: string) => void }) {
+function SelectionScreen({ title, subtitle, options, onSelect }: { key?: string, title: string; subtitle: string; options: string[]; onSelect: (val: string) => void }) {
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
@@ -245,7 +245,7 @@ function MatchingScreen() {
   );
 }
 
-function ChatScreen({ topic, roomId, points, onPointsSpent }: { topic: string, roomId: string, points: number, onPointsSpent: (c: number, t: string, v: string) => void }) {
+function ChatScreen({ topic, roomId, points, onPointsSpent }: { key?: string, topic: string, roomId: string, points: number, onPointsSpent: (c: number, t: string, v: string) => void }) {
   const [messages, setMessages] = useState<Array<{ id: string, text: string, isSelf: boolean, system?: boolean }>>([]);
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
