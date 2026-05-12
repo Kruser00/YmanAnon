@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { socketService } from './socket';
 import { audioService } from './audio';
-import { Terminal, ShieldAlert, Cpu, Heart, Coins, Eye, User, Navigation, Monitor } from 'lucide-react';
+import { Terminal, ShieldAlert, Cpu, Heart, Coins, Eye, User, Navigation, Monitor, Volume2, VolumeX } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -10,18 +10,24 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type AppState = 'START' | 'BOOT' | 'PROFILE' | 'MOOD' | 'INTENT' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT';
+type AppState = 'START' | 'BOOT' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'ORACLE' | 'RATING' | 'DATA_BROKER' | 'CHAT_STATS';
 type Theme = 'green' | 'amber';
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>('START');
-  const [profile, setProfile] = useState<{ age: string, gender: string, city: string }>({ age: '', gender: '', city: ''});
+  const [profile, setProfile] = useState<{ age: string, gender: string, city: string, music: string, hobby: string, mbti: string }>({ age: '', gender: '', city: '', music: '', hobby: '', mbti: ''});
   const [mood, setMood] = useState<string | null>(null);
   const [intent, setIntent] = useState<string | null>(null);
   const [points, setPoints] = useState<number>(0);
+  const [clearance, setClearance] = useState<number>(1);
+  const [reputation, setReputation] = useState<{ positive: number, negative: number }>({ positive: 0, negative: 0 });
   const [roomId, setRoomId] = useState<string | null>(null);
   const [topic, setTopic] = useState<string | null>(null);
+  const [chatStats, setChatStats] = useState<{ duration: number, rank: string, messageCount: number } | null>(null);
+  const [voidMessages, setVoidMessages] = useState<Array<{ text: string, timestamp: number }>>([]);
+  const [atmosphere, setAtmosphere] = useState<{ moods: Record<string, number>, online: number }>({ moods: {}, online: 0 });
   const [theme, setTheme] = useState<Theme>('green');
+  const [isMuted, setIsMuted] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -33,26 +39,49 @@ export default function App() {
     socketService.on('match_found', (data: any) => {
       setRoomId(data.roomId);
       setTopic(data.topic);
-      audioService.playMatchFound();
+      if (!isMuted) audioService.playMatchFound();
       setAppState('CHAT_BOOT');
+    });
+
+    socketService.on('partner_disconnected', () => {
+      // Handled by chat_terminated now
+    });
+
+    socketService.on('chat_terminated', (data: any) => {
+      setChatStats(data);
+      setAppState('CHAT_STATS');
+    });
+
+    socketService.on('void_broadcast', (data: any) => {
+      setVoidMessages(prev => [data, ...prev].slice(0, 3));
+    });
+
+    socketService.on('atmosphere_data', (data: any) => {
+      setAtmosphere(data);
+    });
+
+    socketService.on('atmosphere_updated', (data: any) => {
+      setAtmosphere(data);
     });
 
     socketService.on('points_updated', (data: any) => {
       setPoints(data.points);
     });
 
-    socketService.on('system_message', (data: any) => {
-      // Could push this directly into chat messages via a global state or simple event
+    socketService.on('user_state_sync', (data: any) => {
+      if (data.points !== undefined) setPoints(data.points);
+      if (data.clearance !== undefined) setClearance(data.clearance);
+      if (data.reputation !== undefined) setReputation(data.reputation);
     });
 
     return () => {
       socketService.off('match_found', () => {});
       socketService.off('points_updated', () => {});
     };
-  }, []);
+  }, [isMuted]);
 
   const handleJoinPool = (selectedIntent: string) => {
-    audioService.playKeystroke();
+    if (!isMuted) audioService.playKeystroke();
     setIntent(selectedIntent);
     setAppState('MATCHING');
     socketService.emit('join_pool', { mood, intent: selectedIntent, profile });
@@ -62,15 +91,27 @@ export default function App() {
     setTheme(prev => prev === 'green' ? 'amber' : 'green');
   };
 
+  const toggleAudioMute = () => {
+    audioService.init(); // just in case
+    const muted = audioService.toggleMute();
+    setIsMuted(muted);
+    if (!muted) {
+       audioService.startBGM(); 
+    }
+  };
+
   return (
-    <div className="crt-screen h-screen w-screen">
-      <BackgroundCode />
-      <div className="absolute inset-0 p-4 sm:p-8 flex flex-col pointer-events-auto z-10">
+    <div className="crt-screen h-screen w-screen overflow-hidden bg-black selection:bg-[var(--phos-color)] selection:text-black">
+      <div className="crt-overlay" />
+      <div className="crt-bottom-fade" />
+      <div className="crt-curve h-full w-full relative flex flex-col">
+        <BackgroundCode mood={mood} />
+        <div className="flex-1 p-4 sm:p-8 flex flex-col pointer-events-auto z-10 overflow-hidden">
         {/* Header HUD */}
         <header className="flex justify-between items-center border-b border-[var(--phos-color)]/30 pb-2 mb-6">
           <div className="flex items-center gap-2">
-            <Terminal size={18} className="text-[var(--phos-color)]" />
-            <span className="phosphor-glow font-bold tracking-widest uppercase">
+            <Terminal size={18} className="text-[var(--phos-color)] cursor-pointer" onClick={() => { if(appState !== 'START' && appState !== 'BOOT') setAppState('DASHBOARD'); }} />
+            <span className="phosphor-glow font-bold tracking-widest uppercase cursor-pointer" onClick={() => { if(appState !== 'START' && appState !== 'BOOT') setAppState('DASHBOARD'); }}>
               Terminal.fa
             </span>
           </div>
@@ -87,6 +128,13 @@ export default function App() {
                  </div>
                </div>
              )}
+             <button
+               onClick={toggleAudioMute}
+               className="p-1 hover:bg-[var(--phos-color)]/10 rounded transition-colors text-[var(--phos-color)] opacity-70 hover:opacity-100"
+               title={isMuted ? "Unmute Audio" : "Mute Audio"}
+             >
+               {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+             </button>
              <button
                onClick={toggleTheme}
                className="p-1 hover:bg-[var(--phos-color)]/10 rounded transition-colors text-[var(--phos-color)] opacity-70 hover:opacity-100"
@@ -107,7 +155,8 @@ export default function App() {
                  className="flex h-full items-center justify-center cursor-pointer"
                  onClick={() => {
                    audioService.init();
-                   audioService.playKeystroke();
+                   if (!isMuted) audioService.playKeystroke();
+                   if (!isMuted) audioService.startBGM(); // Start background drone
                    setAppState('BOOT');
                  }}
                >
@@ -122,8 +171,38 @@ export default function App() {
                  key="profile"
                  onComplete={(p) => {
                     setProfile(p);
-                    setAppState('MOOD');
+                    setAppState('DASHBOARD');
                  }}
+              />
+            )}
+
+            {appState === 'DASHBOARD' && (
+              <DashboardScreen
+                 key="dashboard"
+                 onFindConnection={() => setAppState('MOOD')}
+                 onOpenOracle={() => setAppState('ORACLE')}
+                 onOpenBroker={() => setAppState('DATA_BROKER')}
+                 reputation={reputation}
+                 clearance={clearance}
+                 voidMessages={voidMessages}
+                 atmosphere={atmosphere}
+              />
+            )}
+
+            {appState === 'DATA_BROKER' && (
+              <DataBrokerScreen
+                 key="broker"
+                 onBack={() => setAppState('DASHBOARD')}
+                 points={points}
+                 clearance={clearance}
+              />
+            )}
+
+            {appState === 'ORACLE' && (
+              <OracleScreen
+                 key="oracle"
+                 onBack={() => setAppState('DASHBOARD')}
+                 clearance={clearance}
               />
             )}
 
@@ -132,7 +211,7 @@ export default function App() {
                 key="mood"
                 title="SYS > HOW_ARE_YOU_FEELING?"
                 subtitle="Select current emotional parameter."
-                options={['lonely', 'curious', 'bored', 'anxious', 'thoughtful', 'energetic']}
+                options={['lonely', 'happy', 'curious', 'bored', 'anxious', 'thoughtful', 'energetic']}
                 onSelect={(m) => {
                   audioService.playKeystroke();
                   setMood(m);
@@ -151,7 +230,10 @@ export default function App() {
               />
             )}
 
-            {appState === 'MATCHING' && <MatchingScreen key="matching" />}
+            {appState === 'MATCHING' && <MatchingScreen key="matching" onCancel={() => {
+              socketService.emit('leave_pool', {});
+              setAppState('DASHBOARD');
+            }} />}
             
             {appState === 'CHAT_BOOT' && <ChatBootSequence key="chatboot" onComplete={() => setAppState('CHAT')} />}
 
@@ -167,10 +249,26 @@ export default function App() {
                 }}
               />
             )}
+
+            {appState === 'CHAT_STATS' && (
+              <ConversationStatsScreen 
+                key="stats"
+                stats={chatStats}
+                onNext={() => setAppState('RATING')}
+              />
+            )}
+
+            {appState === 'RATING' && (
+              <RatingScreen 
+                key="rating"
+                onComplete={() => setAppState('DASHBOARD')}
+              />
+            )}
           </AnimatePresence>
         </div>
       </div>
     </div>
+  </div>
   );
 }
 
@@ -178,27 +276,76 @@ export default function App() {
 // VIEW COMPONENTS
 // ---------------------------
 
-function BackgroundCode() {
+function BackgroundCode({ mood }: { mood?: string | null }) {
+  const codeLines = useMemo(() => {
+    const lines = [];
+    const instructions = ['LOAD', 'STORE', 'JMP', 'CALL', 'RET', 'PUSH', 'POP', 'ADD', 'SUB', 'XOR', 'CMP', 'SYS.ALLOC', 'SYS.FREE', 'MOV', 'NOP', 'INT', 'HALT', 'STI', 'CLI', 'SHL', 'SHR'];
+    const registers = ['REG_A', 'REG_B', 'REG_X', 'REG_Y', 'EAX', 'EBX', 'ECX', 'EDX', 'ESI', 'EDI', 'EBP', 'ESP', 'FLAGS'];
+    
+    for (let i = 0; i < 200; i++) {
+        const addr = `0x${(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0').toUpperCase().slice(0,6)}`;
+        const instr = instructions[Math.floor(Math.random() * instructions.length)];
+        const reg1 = registers[Math.floor(Math.random() * registers.length)];
+        const reg2 = registers[Math.floor(Math.random() * registers.length)];
+        const val = `0x${(Math.random() * 0xFFFF).toString(16).padStart(4, '0').toUpperCase().slice(0,4)}`;
+        
+        let line = '';
+        const type = Math.random();
+        if (type < 0.1 && mood) {
+            line = `${addr} EMOTION_${mood.toUpperCase()}_DETECTED`;
+        } else if (type < 0.2) {
+            line = `${addr} ${instr} ${reg1}, ${val}`;
+        } else if (type < 0.4) {
+            line = `${addr} ${instr} ${reg1}, [${reg2}+${val}]`;
+        } else if (type < 0.6) {
+            line = `${addr} ${instr} SUB_${val}`;
+        } else if (type < 0.8) {
+            line = `${addr} ${instr} -> STATUS_OK`;
+        } else {
+             line = `${addr} DBG: ALOC DETECTED IN ${reg1}`;
+        }
+        lines.push(line);
+    }
+    return lines;
+  }, [mood]);
+
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none z-0 opacity-10 blur-[1px]">
       <div className="animate-scroll-code flex flex-col font-mono text-[var(--phos-color)] text-[10px] leading-tight whitespace-pre">
-        {Array.from({ length: 50 }).map((_, i) => (
-          <div key={i}>
-{`0x${(Math.random() * 0xFFFFF).toString(16).padStart(5, '0').toUpperCase()} LOAD REG A, [MEM+${(Math.random() * 0xFF).toString(16).padStart(2, '0').toUpperCase()}]
-0x${(Math.random() * 0xFFFFF).toString(16).padStart(5, '0').toUpperCase()} CALL SUB_${(Math.random() * 0xFFF).toString(16).padStart(3, '0').toUpperCase()}
-0x${(Math.random() * 0xFFFFF).toString(16).padStart(5, '0').toUpperCase()} CHECK PROTOCOL_HANDSHAKE
-0x${(Math.random() * 0xFFFFF).toString(16).padStart(5, '0').toUpperCase()} SYS.ALLOC(0x2000) -> OK
-0x${(Math.random() * 0xFFFFF).toString(16).padStart(5, '0').toUpperCase()} JMP IF NOT ZERO 0x${(Math.random() * 0xFFFFF).toString(16).padStart(5, '0').toUpperCase()}`}
-          </div>
+        {codeLines.map((line, i) => (
+          <div key={i}>{line}</div>
         ))}
       </div>
+      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-[var(--bg-color)] to-transparent" />
     </div>
   );
 }
 
-function BootSequence({ onComplete }: { key?: string, onComplete: () => void }) {
+function BootSequence({ onComplete }: { onComplete: () => void }) {
+  const [logs, setLogs] = useState<string[]>([]);
+  const [progress, setProgress] = useState(0);
+
   useEffect(() => {
-    const timer = setTimeout(onComplete, 2500);
+    const bootSteps = [
+      { text: 'BIOS Check... OK', delay: 300 },
+      { text: 'Loading memory blocks... [1024 OK]', delay: 600 },
+      { text: 'Initializing neural engine...', delay: 1000 },
+      { text: 'Establishing secure websocket...', delay: 1500 },
+      { text: 'Bypass protocol active...', delay: 2000 },
+      { text: 'Loading anonymity layer...', delay: 2500 },
+      { text: 'Generating unique identity matrix...', delay: 3000 },
+      { text: 'Terminal.fa ready.', delay: 3800 }
+    ];
+
+    bootSteps.forEach(({ text, delay }) => {
+      setTimeout(() => {
+        setLogs(prev => [...prev, text]);
+        setProgress(Math.floor((delay / 4000) * 100));
+        audioService.playKeystroke();
+      }, delay);
+    });
+
+    const timer = setTimeout(onComplete, 4500);
     return () => clearTimeout(timer);
   }, [onComplete]);
 
@@ -207,19 +354,30 @@ function BootSequence({ onComplete }: { key?: string, onComplete: () => void }) 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0, filter: "blur(4px)" }}
-      className="flex flex-col items-center justify-center h-full text-center space-y-4"
+      className="flex flex-col items-center justify-center h-full max-w-md mx-auto w-full space-y-4"
     >
       <Cpu size={48} className="text-[var(--phos-color)] mb-4 animate-pulse opacity-80" />
-      <span className="phosphor-glow text-xl tracking-widest">INITIALIZING TERMINAL.FA</span>
-      <span className="phosphor-dim text-sm uppercase">Bypass protocol active...</span>
-      <span className="phosphor-dim text-sm uppercase">Loading anonymity layer...</span>
-      <div className="w-48 h-1 bg-[var(--phos-dim)] mt-4 relative overflow-hidden">
-        <motion.div 
-          className="absolute top-0 left-0 h-full bg-[var(--phos-color)]"
-          initial={{ width: '0%' }}
-          animate={{ width: '100%' }}
-          transition={{ duration: 2.2, ease: "easeInOut" }}
-        />
+      <span className="phosphor-glow text-xl tracking-widest text-center">INITIALIZING TERMINAL.FA</span>
+      
+      <div className="w-full flex-col flex text-left font-mono text-xs space-y-1 mt-6 px-4">
+         {logs.map((log, i) => (
+           <motion.div key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}>
+             <span className="opacity-50 inline-block w-24">[{new Date().toISOString().substring(11,23)}]</span>
+             <span className="phosphor-glow ml-2">{log}</span>
+           </motion.div>
+         ))}
+      </div>
+
+      <div className="w-full px-4 mt-8">
+        <div className="w-full h-1 bg-[var(--phos-color)]/20 relative overflow-hidden">
+          <motion.div 
+            className="absolute top-0 left-0 h-full bg-[var(--phos-color)]"
+            initial={{ width: '0%' }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.2 }}
+          />
+        </div>
+        <div className="text-right text-[10px] font-mono opacity-50 mt-1 uppercase">{progress}% allocated</div>
       </div>
     </motion.div>
   );
@@ -229,12 +387,15 @@ function ProfileSetupScreen({ onComplete }: { key?: string, onComplete: (p: any)
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('');
   const [city, setCity] = useState('');
+  const [music, setMusic] = useState('');
+  const [hobby, setHobby] = useState('');
+  const [mbti, setMbti] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (age && gender && city) {
+    if (age && gender && city && music && hobby && mbti) {
        audioService.playKeystroke();
-       onComplete({ age, gender, city });
+       onComplete({ age, gender, city, music, hobby, mbti });
     }
   };
 
@@ -243,29 +404,42 @@ function ProfileSetupScreen({ onComplete }: { key?: string, onComplete: (p: any)
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="flex flex-col h-full max-w-lg mx-auto py-12 justify-center"
+      className="flex flex-col h-full max-w-lg mx-auto py-12 justify-center relative"
     >
-      <div className="mb-8 text-center">
-        <h2 className="text-2xl phosphor-glow mb-2 uppercase">Establish Identity Matrix</h2>
-        <p className="phosphor-dim text-sm">Data encrypted. Only revealed upon mutual agreement.</p>
+      <div className="absolute inset-0 pointer-events-none rounded-xl border border-[var(--phos-color)]/20 shadow-[0_0_30px_var(--phos-dim)]" />
+      <div className="mb-6 text-center px-4">
+        <h2 className="text-2xl fx-holo mb-2 uppercase tracking-[0.1em] mt-4 font-bold">Establish Identity Matrix</h2>
+        <p className="phosphor-dim text-sm mt-2">Data encrypted. Only revealed upon mutual agreement.</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6 flex flex-col">
+      <form onSubmit={handleSubmit} className="space-y-4 flex flex-col overflow-y-auto px-4 pb-4">
         <div className="flex flex-col gap-1">
-           <label className="phosphor-dim uppercase text-xs">&gt; Enter Age Range</label>
-           <input required type="text" placeholder="e.g. 20-25" value={age} onChange={(e) => { audioService.playKeystroke(); setAge(e.target.value) }} className="bg-transparent border border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
+           <label className="phosphor-dim uppercase text-xs">&gt; Age Range</label>
+           <input required type="text" placeholder="e.g. 20-25" value={age} onChange={(e) => { audioService.playKeystroke(); setAge(e.target.value) }} className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
         </div>
         <div className="flex flex-col gap-1">
-           <label className="phosphor-dim uppercase text-xs">&gt; Enter Gender</label>
-           <input required type="text" placeholder="e.g. Female" value={gender} onChange={(e) => { audioService.playKeystroke(); setGender(e.target.value) }} className="bg-transparent border border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
+           <label className="phosphor-dim uppercase text-xs">&gt; Gender</label>
+           <input required type="text" placeholder="e.g. Female" value={gender} onChange={(e) => { audioService.playKeystroke(); setGender(e.target.value) }} className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
         </div>
         <div className="flex flex-col gap-1">
-           <label className="phosphor-dim uppercase text-xs">&gt; Enter City (or Region)</label>
-           <input required type="text" placeholder="e.g. Tehran" value={city} onChange={(e) => { audioService.playKeystroke(); setCity(e.target.value) }} className="bg-transparent border border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
+           <label className="phosphor-dim uppercase text-xs">&gt; City (or Region)</label>
+           <input required type="text" placeholder="e.g. Tehran" value={city} onChange={(e) => { audioService.playKeystroke(); setCity(e.target.value) }} className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
+        </div>
+        <div className="flex flex-col gap-1">
+           <label className="phosphor-dim uppercase text-xs">&gt; Top Music Genre</label>
+           <input required type="text" placeholder="e.g. Synthwave" value={music} onChange={(e) => { audioService.playKeystroke(); setMusic(e.target.value) }} className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
+        </div>
+        <div className="flex flex-col gap-1">
+           <label className="phosphor-dim uppercase text-xs">&gt; Main Hobby</label>
+           <input required type="text" placeholder="e.g. Gaming" value={hobby} onChange={(e) => { audioService.playKeystroke(); setHobby(e.target.value) }} className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
+        </div>
+        <div className="flex flex-col gap-1">
+           <label className="phosphor-dim uppercase text-xs">&gt; MBTI (or NA)</label>
+           <input required type="text" placeholder="e.g. INTP" value={mbti} onChange={(e) => { audioService.playKeystroke(); setMbti(e.target.value) }} className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors" />
         </div>
         
-        <button type="submit" disabled={!age || !gender || !city} className="mt-4 border border-[var(--phos-color)] p-3 uppercase tracking-widest hover:bg-[var(--phos-color)]/20 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-          Initialize Profile
+        <button type="submit" disabled={!age || !gender || !city || !music || !hobby || !mbti} className="mt-8 relative border border-[var(--phos-color)] bg-[var(--phos-color)]/5 flex-shrink-0 p-3 uppercase tracking-widest hover:bg-[var(--phos-color)]/20 disabled:opacity-30 disabled:hover:bg-transparent transition-colors fx-border-shine overflow-hidden group">
+          <span className="relative z-10 group-hover:fx-holo transition-all duration-300">Initialize Profile</span>
         </button>
       </form>
     </motion.div>
@@ -305,22 +479,456 @@ function SelectionScreen({ title, subtitle, options, onSelect }: { key?: string,
   );
 }
 
-function MatchingScreen() {
+function MatchingScreen({ onCancel }: { key?: string, onCancel?: () => void }) {
   return (
     <motion.div 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex flex-col items-center justify-center h-full text-center space-y-6"
+      className="flex flex-col items-center justify-center h-full text-center space-y-6 relative"
     >
+      {onCancel && (
+        <button onClick={() => { audioService.playKeystroke(); onCancel(); }} className="absolute top-2 right-2 p-2 hover:bg-[var(--phos-color)]/20 text-xs font-mono uppercase border border-[var(--phos-color)]/30 fx-border-shine">
+          Cancel Search
+        </button>
+      )}
       <div className="relative">
         <Heart size={48} className="text-[var(--phos-color)] animate-pulse relative z-10" />
         <div className="absolute inset-0 bg-[var(--phos-color)] blur-xl opacity-20 animate-pulse" />
       </div>
       <div className="flex flex-col gap-2">
-        <span className="phosphor-glow text-lg uppercase">Searching matching pool</span>
+        <span className="fx-holo font-bold !text-white text-lg uppercase tracking-wider">Searching matching pool</span>
         <span className="phosphor-dim text-sm">Aligning intent frequencies...</span>
       </div>
+    </motion.div>
+  );
+}
+
+function ConversationStatsScreen({ stats, onNext }: { stats: any, onNext: () => void }) {
+  if (!stats) return null;
+  
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex flex-col h-full max-w-lg mx-auto py-12 justify-center font-mono"
+    >
+      <div className="mb-8 text-center border-b border-[var(--phos-color)]/30 pb-6 relative fx-border-shine overflow-hidden p-6">
+        <div className="absolute inset-0 bg-[var(--phos-color)]/5 -z-10" />
+        <h2 className="text-3xl fx-holo mb-4 uppercase tracking-[0.2em] font-bold">SESSION ARCHIVAL</h2>
+        <div className="flex justify-center gap-1 opacity-50 mb-2">
+            {Array(5).fill(0).map((_, i) => <div key={i} className="w-1 h-1 bg-[var(--phos-color)] rounded-full animate-pulse" style={{ animationDelay: `${i*0.2}s` }} />)}
+        </div>
+        <p className="text-sm opacity-70">Conversation stats analyzed and cataloged.</p>
+      </div>
+
+      <div className="space-y-6 mb-12">
+        <div className="flex justify-between items-center border-b border-[var(--phos-color)]/10 pb-2">
+           <span className="opacity-50 uppercase text-xs">Duration</span>
+           <span className="text-xl phosphor-glow">{Math.floor(stats.duration / 60)}m {stats.duration % 60}s</span>
+        </div>
+        <div className="flex justify-between items-center border-b border-[var(--phos-color)]/10 pb-2">
+           <span className="opacity-50 uppercase text-xs">Data Transmitted</span>
+           <span className="text-xl phosphor-glow">{stats.messageCount} Message Packets</span>
+        </div>
+        <div className="flex justify-between items-center border-b border-[var(--phos-color)]/10 pb-2">
+           <span className="opacity-50 uppercase text-xs">Network Ranking</span>
+           <div className="flex flex-col items-end">
+             <span className="text-2xl fx-holo text-yellow-400 font-bold">{stats.rank}</span>
+             <span className="text-[10px] opacity-40 uppercase">Global session percentile</span>
+           </div>
+        </div>
+      </div>
+
+      <button 
+        onClick={() => { audioService.playKeystroke(); onNext(); }} 
+        className="border border-[var(--phos-color)] p-4 uppercase tracking-widest hover:bg-[var(--phos-color)]/20 shadow-[0_0_15px_var(--phos-dim)] group relative overflow-hidden fx-border-shine"
+      >
+        <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <span className="relative z-10 group-hover:fx-holo">Proceed to Verification</span>
+      </button>
+    </motion.div>
+  );
+}
+
+function RatingScreen({ onComplete }: { key?: string, onComplete: () => void }) {
+  const [selected, setSelected] = useState<string[]>([]);
+  
+  const positiveTags = ['thoughtful', 'respectful', 'funny', 'comforting', 'intelligent'];
+  const negativeTags = ['creepy', 'spam', 'rude', 'boring'];
+
+  const handleToggle = (tag: string) => {
+    audioService.playKeystroke();
+    setSelected(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+  };
+
+  const handleSubmit = () => {
+    audioService.playKeystroke();
+    socketService.emit('rate_partner', { tags: selected });
+    onComplete();
+  };
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex flex-col h-full max-w-lg mx-auto py-12 justify-center"
+    >
+      <div className="mb-8 text-center text-[var(--phos-color)]">
+        <h2 className="text-2xl fx-holo mb-2 uppercase font-bold">Connection Terminated</h2>
+        <p className="opacity-70 text-sm font-mono mt-2">&gt; Rate your peer. This reinforces network safety and matching efficiency.</p>
+      </div>
+
+      <div className="mb-6 space-y-4">
+        <div>
+           <div className="uppercase font-mono text-xs opacity-50 mb-2 border-b border-[var(--phos-color)]/20 pb-1">Positive Attributes</div>
+           <div className="flex flex-wrap gap-2">
+             {positiveTags.map(tag => (
+                <button 
+                  key={tag}
+                  onClick={() => handleToggle(tag)}
+                  className={clsx(
+                    "border border-[var(--phos-color)]/30 px-3 py-1 font-mono text-xs uppercase hover:bg-[var(--phos-color)]/20 transition-colors cursor-pointer",
+                    selected.includes(tag) && "bg-[var(--phos-color)] text-[var(--bg-color)] font-bold shadow-[0_0_10px_var(--phos-color)]"
+                  )}
+                >
+                  {tag}
+                </button>
+             ))}
+           </div>
+        </div>
+
+        <div>
+           <div className="uppercase font-mono text-xs opacity-50 mb-2 border-b border-[var(--phos-color)]/20 pb-1 mt-6">Negative Attributes</div>
+           <div className="flex flex-wrap gap-2">
+             {negativeTags.map(tag => (
+                <button 
+                  key={tag}
+                  onClick={() => handleToggle(tag)}
+                  className={clsx(
+                    "border border-red-500/30 text-red-500 px-3 py-1 font-mono text-xs uppercase hover:bg-red-500/20 transition-colors cursor-pointer",
+                    selected.includes(tag) && "bg-red-500 text-black font-bold shadow-[0_0_10px_rgba(239,68,68,0.8)]"
+                  )}
+                >
+                  {tag}
+                </button>
+             ))}
+           </div>
+        </div>
+      </div>
+
+      <button 
+        onClick={handleSubmit} 
+        className="mt-8 border border-[var(--phos-color)] p-4 uppercase tracking-widest hover:bg-[var(--phos-color)]/20 hover:shadow-[0_0_15px_var(--phos-color)] transition-all"
+      >
+        Transmit Feedback & Return
+      </button>
+
+      <button 
+        onClick={onComplete} 
+        className="mt-4 text-[10px] opacity-40 hover:opacity-100 uppercase tracking-widest transition-opacity"
+      >
+        Skip Verification
+      </button>
+    </motion.div>
+  );
+}
+
+function DataBrokerScreen({ onBack, points, clearance }: { onBack: () => void, points: number, clearance: number }) {
+  const [logs, setLogs] = useState<string[]>(['[DATA BROKER] Connection established.']);
+
+  const logAction = (msg: string) => {
+    setLogs(prev => [msg, ...prev].slice(0, 5));
+    audioService.playKeystroke();
+  };
+
+  const buyClearance = () => {
+    if (points >= 500) {
+      socketService.emit('buy_clearance');
+      logAction('>> Requesting Level 2 Clearance clearance...');
+    } else {
+      logAction('!! Insufficient funds for clearance upgrade.');
+    }
+  };
+
+  const buyIntel = () => {
+    if (points >= 50) {
+      logAction('>> Purchasing regional metadata (simulated)...');
+      socketService.emit('spend_points', { amount: 50 });
+      setTimeout(() => logAction('>> Intel: "Synthwave" listeners are active in sector 4.'), 1000);
+    } else {
+      logAction('!! Insufficient funds for intel.');
+    }
+  };
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex flex-col h-full max-w-2xl mx-auto py-8 justify-center relative"
+    >
+      <div className="mb-4 text-center border-b border-[var(--phos-color)]/30 pb-4 relative z-10 px-4">
+        <h2 className="text-2xl fx-holo mb-2 uppercase tracking-[0.2em]">DATA BROKER</h2>
+        <p className="phosphor-dim text-sm mt-2 font-mono">&gt; Spend pts to acquire privileged data and access rights.</p>
+      </div>
+
+      <div className="flex-1 flex flex-col sm:flex-row gap-6 p-4">
+         <div className="flex-1 space-y-4">
+            <h3 className="font-mono text-xs uppercase opacity-70 border-b border-[var(--phos-color)]/20 pb-1">Available Contracts</h3>
+            
+            <button onClick={buyIntel} className="w-full border border-[var(--phos-color)] p-4 hover:bg-[var(--phos-color)]/10 text-left group transition-all">
+               <div className="font-mono font-bold group-hover:fx-holo">Regional Intel snippet</div>
+               <div className="flex justify-between items-center mt-2 text-xs opacity-70 font-mono">
+                 <span>Random global matching data.</span>
+                 <span className="text-yellow-400">50 PTS</span>
+               </div>
+            </button>
+
+            <button onClick={buyClearance} disabled={clearance > 1} className="w-full border border-[var(--phos-color)] p-4 hover:bg-[var(--phos-color)]/10 text-left group transition-all disabled:opacity-30 disabled:hover:bg-transparent">
+               <div className="font-mono font-bold group-hover:fx-holo">Security Clearance Level 2</div>
+               <div className="flex justify-between items-center mt-2 text-xs opacity-70 font-mono">
+                 <span>Unlock premium Oracle threads.</span>
+                 <span className="text-yellow-400">500 PTS</span>
+               </div>
+            </button>
+         </div>
+         <div className="flex-1 border border-[var(--phos-color)]/20 p-4 bg-black/40 flex flex-col font-mono text-xs overflow-hidden h-48 sm:h-auto">
+            <h3 className="uppercase opacity-70 border-b border-[var(--phos-color)]/20 pb-1 mb-2">Terminal Logs</h3>
+            <div className="flex-1 overflow-y-auto space-y-2 opacity-80">
+               {logs.map((log, i) => (
+                 <div key={i} className={i === 0 ? 'text-[var(--phos-color)]' : 'opacity-50'}>{log}</div>
+               ))}
+            </div>
+         </div>
+      </div>
+      
+      <div className="px-4 mt-6">
+        <button onClick={() => { audioService.playKeystroke(); onBack(); }} className="border border-[var(--phos-color)] px-6 py-2 uppercase font-mono text-xs hover:bg-[var(--phos-color)]/20 transition-all opacity-80 hover:opacity-100">
+          &lt; Return to Dashboard
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+function DashboardScreen({ onFindConnection, onOpenOracle, onOpenBroker, reputation, clearance, voidMessages, atmosphere }: { onFindConnection: () => void, onOpenOracle: () => void, onOpenBroker: () => void, reputation: { positive: number, negative: number }, clearance: number, voidMessages: any[], atmosphere: any }) {
+
+  useEffect(() => {
+    socketService.emit('request_atmosphere', {});
+  }, []);
+
+  const totalMoods = Object.values(atmosphere.moods).reduce((a: number, b: any) => a + b, 0) || 1;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex flex-col h-full max-w-2xl mx-auto justify-center relative"
+    >
+      <div className="absolute inset-0 pointer-events-none rounded-xl border border-[var(--phos-color)]/10 shadow-[0_0_20px_var(--phos-dim)]" />
+      <div className="mb-8 text-center border-b border-[var(--phos-color)]/30 pb-4 relative z-10 p-4">
+        <h2 className="text-2xl sm:text-3xl fx-holo mb-2 uppercase tracking-[0.2em]">&gt; NETWORK STATUS</h2>
+        <div className="flex flex-wrap gap-4 justify-center items-center mt-4 text-[10px] sm:text-sm">
+          <div className="flex items-center gap-2 border border-[var(--phos-color)]/20 px-2 py-1">
+            <User size={14} className="text-[var(--phos-color)]" />
+             <span className="phosphor-glow font-mono uppercase">{atmosphere.online} users mapped</span>
+          </div>
+          <div className="flex items-center gap-2 border border-[var(--phos-color)]/20 px-2 py-1">
+            <ShieldAlert size={14} className={clearance > 1 ? "text-yellow-400" : "text-[var(--phos-color)]/50"} />
+            <span className="font-mono uppercase">Lvl {clearance} Clearance</span>
+          </div>
+          <div className="flex items-center gap-2 border border-[var(--phos-color)]/20 px-2 py-1">
+            <Heart size={14} className="text-red-500" />
+            <span className="font-mono uppercase">Rep: {reputation.positive} / {reputation.negative}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-12 relative z-10 px-4 flex flex-col md:flex-row gap-8">
+        <div className="flex-1">
+          <h3 className="phosphor-dim uppercase text-xs mb-4 tracking-widest">&gt; GLOBAL ATMOSPHERE CALIBRATION</h3>
+          <div className="space-y-2 font-mono text-[10px]">
+            {Object.entries(atmosphere.moods).map(([mood, count]: [string, any]) => {
+              const pct = Math.round((count / totalMoods) * 100);
+              return (
+                <div key={mood} className="flex flex-row items-center gap-4">
+                   <div className="w-20 uppercase font-bold tracking-wide">{mood}</div>
+                   <div className="flex-1 h-2 bg-[var(--phos-color)]/10 overflow-hidden relative border border-[var(--phos-color)]/20 shadow-[0_0_5px_var(--phos-dim)]">
+                      <motion.div 
+                        className="h-full bg-[var(--phos-color)] opacity-70"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{ duration: 1 }}
+                      />
+                   </div>
+                   <div className="w-8 text-right opacity-80">{pct}%</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex-1 border border-[var(--phos-color)]/20 p-4 bg-black/20 min-h-[150px] flex flex-col">
+          <h3 className="phosphor-dim uppercase text-xs mb-4 tracking-widest border-b border-[var(--phos-color)]/20 pb-1">Broadcast Stream (The Void)</h3>
+          <div className="flex-1 space-y-4 overflow-y-auto">
+            {voidMessages.length === 0 ? (
+               <div className="text-[10px] opacity-30 italic font-mono text-center mt-4">Static noise... no fragments detected.</div>
+            ) : voidMessages.map((m, i) => (
+               <motion.div 
+                 key={i} 
+                 initial={{ opacity: 0, x: 20 }}
+                 animate={{ opacity: 1, x: 0 }}
+                 className="font-mono text-xs border-l border-[var(--phos-color)]/40 pl-3 py-1"
+               >
+                 <div className="opacity-50 text-[8px] uppercase mb-1">{new Date(m.timestamp).toLocaleTimeString()} // ANONYMOUS FRAGMENT</div>
+                 <div className="phosphor-glow italic">"{m.text}"</div>
+               </motion.div>
+            ))}
+          </div>
+          <div className="mt-4 text-[8px] opacity-30 uppercase tracking-tighter self-end font-mono">End of stream.</div>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-4 font-mono relative z-10 px-4 pb-4">
+        <button 
+           onClick={() => { audioService.playKeystroke(); onOpenOracle(); }}
+           className="flex-1 min-w-[30%] border border-[var(--phos-color)] p-4 sm:p-6 hover:bg-[var(--phos-color)]/10 hover:shadow-[0_0_15px_var(--phos-color)] transition-all flex flex-col items-center justify-center gap-2 relative overflow-hidden group fx-border-shine"
+        >
+           <Eye size={20} className="mb-1 sm:mb-2 text-[var(--phos-color)] group-hover:animate-pulse" />
+           <span className="uppercase tracking-widest text-sm sm:text-lg relative z-10 group-hover:fx-holo transition-all duration-300">The Oracle</span>
+           <span className="opacity-50 text-[10px] sm:text-xs text-center relative z-10">&gt; Async threads.</span>
+        </button>
+        <button 
+           onClick={() => { audioService.playKeystroke(); onFindConnection(); }}
+           className="flex-1 min-w-[30%] border bg-[var(--phos-color)]/10 border-[var(--phos-color)] p-4 sm:p-6 hover:bg-[var(--phos-color)]/20 hover:shadow-[0_0_15px_var(--phos-color)] transition-all flex flex-col items-center justify-center gap-2 relative overflow-hidden group fx-border-shine"
+        >
+           <Heart size={20} className="mb-1 sm:mb-2 text-[var(--phos-color)] group-hover:animate-pulse" />
+           <span className="uppercase tracking-widest text-sm sm:text-lg relative z-10 group-hover:fx-holo transition-all duration-300">Find Connection</span>
+           <span className="opacity-50 text-[10px] sm:text-xs text-center relative z-10">&gt; Enter queue.</span>
+        </button>
+        <button 
+           onClick={() => { audioService.playKeystroke(); onOpenBroker(); }}
+           className="flex-1 min-w-[30%] border border-[var(--phos-color)] p-4 sm:p-6 hover:bg-[var(--phos-color)]/10 hover:shadow-[0_0_15px_var(--phos-color)] transition-all flex flex-col items-center justify-center gap-2 relative overflow-hidden group fx-border-shine"
+        >
+           <ShieldAlert size={20} className="mb-1 sm:mb-2 text-[var(--phos-color)] group-hover:animate-pulse" />
+           <span className="uppercase tracking-widest text-sm sm:text-lg relative z-10 group-hover:fx-holo transition-all duration-300">Data Broker</span>
+           <span className="opacity-50 text-[10px] sm:text-xs text-center relative z-10">&gt; Intel & upgrades.</span>
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+function OracleScreen({ onBack, clearance }: { onBack: () => void, clearance: number }) {
+  const [threads, setThreads] = useState<any[]>([]);
+  const [activeThread, setActiveThread] = useState<any | null>(null);
+  const [input, setInput] = useState('');
+
+  useEffect(() => {
+     socketService.emit('request_oracle', {});
+
+     socketService.on('oracle_data', (data) => setThreads(data));
+     socketService.on('oracle_updated', () => socketService.emit('request_oracle', {}));
+  }, []);
+
+  const handlePostThread = (e: React.FormEvent) => {
+    e.preventDefault();
+    if(input.trim()) {
+       audioService.playKeystroke();
+       socketService.emit('post_oracle_thread', { question: input });
+       setInput('');
+    }
+  };
+
+  const handlePostAnswer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if(input.trim() && activeThread) {
+       audioService.playKeystroke();
+       socketService.emit('post_oracle_answer', { threadId: activeThread.id, text: input });
+       setInput('');
+       // Keep user in thread to see their answer instead of kicking them out
+    }
+  };
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex flex-col h-full max-w-4xl mx-auto relative"
+    >
+       <button onClick={() => { audioService.playKeystroke(); onBack(); }} className="absolute top-0 right-0 p-2 hover:bg-[var(--phos-color)]/20 text-xs font-mono uppercase border border-[var(--phos-color)]/30">
+          &lt; Return to Dashboard
+       </button>
+       <div className="border-b border-[var(--phos-color)]/30 pb-4 mb-4">
+         <h2 className="text-2xl phosphor-glow uppercase tracking-widest flex items-center gap-2">
+           <Eye size={24} /> THE ORACLE
+         </h2>
+         <p className="phosphor-dim text-sm font-mono mt-2">&gt; Asynchronous anonymous wisdom layer. Contributions are permanent.</p>
+       </div>
+
+       {!activeThread ? (
+         <div className="flex flex-col flex-1 overflow-hidden min-h-0">
+           <form onSubmit={handlePostThread} className="mb-6 flex gap-2">
+             <input 
+                type="text" 
+                value={input}
+                onChange={e => { audioService.playKeystroke(); setInput(e.target.value) }}
+                placeholder="Ask the network a question..."
+                className="flex-1 bg-transparent border border-[var(--phos-color)]/30 p-3 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] font-mono text-sm"
+             />
+             <button type="submit" disabled={!input} className="border border-[var(--phos-color)] px-6 uppercase font-mono text-sm hover:bg-[var(--phos-color)]/20 disabled:opacity-30">Transmit</button>
+           </form>
+
+           <div className="flex-1 overflow-y-auto space-y-4 pr-2 font-mono">
+             {threads.map(t => (
+                <div key={t.id} onClick={() => { audioService.playKeystroke(); setActiveThread(t) }} className="border border-[var(--phos-color)]/20 p-4 hover:border-[var(--phos-color)]/60 cursor-pointer transition-colors group">
+                   <div className="text-lg phosphor-glow mb-2">{t.question}</div>
+                   <div className="flex items-center gap-4 text-xs opacity-60 uppercase">
+                     <span>{new Date(t.timestamp).toLocaleTimeString()}</span>
+                     <span>{t.answersCount} {t.answersCount === 1 ? 'Response' : 'Responses'}</span>
+                     <span className="opacity-0 group-hover:opacity-100 ml-auto transition-opacity text-[var(--phos-color)]">&gt; OPEN PROTOCOL</span>
+                   </div>
+                </div>
+             ))}
+           </div>
+         </div>
+       ) : (
+         <div className="flex flex-col flex-1 min-h-0 font-mono">
+            <button onClick={() => { audioService.playKeystroke(); setActiveThread(null) }} className="self-start text-xs uppercase opacity-80 hover:opacity-100 hover:bg-[var(--phos-color)]/20 mb-4 flex items-center gap-1 border border-[var(--phos-color)]/30 px-3 py-1">
+              &lt; RETURN TO DIRECTORY
+            </button>
+            <div className="text-2xl phosphor-glow mb-6 leading-relaxed">
+              {activeThread.question}
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
+              {activeThread.answers.length === 0 ? (
+                 <div className="opacity-50 text-center py-10 uppercase">&gt; NO RESPONSES RECEIVED YET</div>
+              ) : activeThread.answers.map((a: any) => (
+                 <div key={a.id} className="border-l-2 border-[var(--phos-color)]/40 pl-4 py-2">
+                    <div className="mb-2">{a.text}</div>
+                    <div className="text-[10px] opacity-50 uppercase">{new Date(a.timestamp).toLocaleString()} // ANONYMOUS PEER</div>
+                 </div>
+              ))}
+            </div>
+
+            <form onSubmit={handlePostAnswer} className="flex gap-2">
+             <input 
+                type="text" 
+                value={input}
+                onChange={e => { audioService.playKeystroke(); setInput(e.target.value) }}
+                placeholder="Contribute your response..."
+                className="flex-1 bg-transparent border border-[var(--phos-color)]/30 p-3 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] font-mono text-sm"
+                autoFocus /* eslint-disable-line jsx-a11y/no-autofocus */
+             />
+             <button type="submit" disabled={!input} className="border border-[var(--phos-color)] px-6 uppercase font-mono text-sm hover:bg-[var(--phos-color)]/20 disabled:opacity-30">Contribute</button>
+           </form>
+         </div>
+       )}
     </motion.div>
   );
 }
@@ -452,18 +1060,29 @@ function ChatScreen({ topic, roomId, points, onPointsSpent }: { key?: string, to
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--bg-color)] border border-[var(--phos-color)]/20 max-w-4xl mx-auto shadow-[0_0_20px_rgba(0,0,0,0.5)]">
-      
+    <div className="flex flex-col h-full bg-[var(--bg-color)] border border-[var(--phos-color)]/20 max-w-4xl mx-auto shadow-[0_0_20px_rgba(0,0,0,0.5)] relative">
+      <button onClick={() => { audioService.playKeystroke(); socketService.emit('leave_pool', {}); }} className="absolute top-2 right-2 p-1 px-2 hover:bg-[var(--phos-color)]/20 text-[10px] font-mono uppercase border border-[var(--phos-color)]/30 text-red-500 z-10">
+          Disconnect
+      </button>
+
       {/* Identity Store / Actions Sidebar - hidden on mobile behind a menu conceptually, for now top bar */}
-      <div className="border-b border-[var(--phos-color)]/20 p-2 flex gap-4 overflow-x-auto whitespace-nowrap text-xs">
-        <span className="phosphor-dim uppercase py-1">Exchange Points:</span>
+      <div className="border-b border-[var(--phos-color)]/20 p-2 pt-8 sm:pt-2 flex gap-4 overflow-x-auto whitespace-nowrap text-xs">
+        <span className="phosphor-dim uppercase py-1 hidden sm:inline">Exchange Points:</span>
         <button 
           onClick={() => onPointsSpent(300, 'Age')}
           className="border border-[var(--phos-color)]/30 px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex items-center gap-1 group"
           title="Cost: 300 pts"
         >
            <Eye size={12} className="group-hover:animate-pulse" />
-           <span>Propose Reveal Age (300)</span>
+           <span>Age (300)</span>
+        </button>
+        <button 
+          onClick={() => onPointsSpent(400, 'Gender')}
+          className="border border-[var(--phos-color)]/30 px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex items-center gap-1 group"
+          title="Cost: 400 pts"
+        >
+           <Eye size={12} className="group-hover:animate-pulse" />
+           <span>Gender (400)</span>
         </button>
         <button 
           onClick={() => onPointsSpent(500, 'City')}
@@ -471,7 +1090,43 @@ function ChatScreen({ topic, roomId, points, onPointsSpent }: { key?: string, to
           title="Cost: 500 pts"
         >
            <Navigation size={12} className="group-hover:animate-pulse" />
-           <span>Propose Reveal City (500)</span>
+           <span>City (500)</span>
+        </button>
+        <button 
+          onClick={() => onPointsSpent(600, 'Music')}
+          className="border border-[var(--phos-color)]/30 px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex items-center gap-1 group"
+          title="Cost: 600 pts"
+        >
+           <Eye size={12} className="group-hover:animate-pulse" />
+           <span>Music (600)</span>
+        </button>
+        <button 
+          onClick={() => onPointsSpent(600, 'Hobby')}
+          className="border border-[var(--phos-color)]/30 px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex items-center gap-1 group"
+          title="Cost: 600 pts"
+        >
+           <Eye size={12} className="group-hover:animate-pulse" />
+           <span>Hobby (600)</span>
+        </button>
+        <button 
+          onClick={() => onPointsSpent(800, 'MBTI')}
+          className="border border-[var(--phos-color)]/30 px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex items-center gap-1 group"
+          title="Cost: 800 pts"
+        >
+           <Eye size={12} className="group-hover:animate-pulse" />
+           <span>MBTI (800)</span>
+        </button>
+        
+        <button 
+          onClick={() => {
+             audioService.playKeystroke();
+             socketService.emit('trigger_activity', {});
+          }}
+          className="border border-[var(--phos-color)]/30 px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex items-center gap-1 group ml-auto"
+          title="Inject Activity"
+        >
+           <Terminal size={12} className="group-hover:animate-pulse" />
+           <span>Inject Activity</span>
         </button>
       </div>
 
