@@ -1,6 +1,6 @@
 {
-  "name": "TERMINAL.FA",
-  "description": "A Farsi-focused anonymous chat application with a retro CRT terminal aesthetic, featuring mood-based matchmaking and an identity reveal point economy.",
+  "name": "Terminal.fa",
+  "description": "A retro-future terminal for deep, anonymous connections. Features an Oracle for async wisdom, a real-time matching engine, and a point-based economy for identity discovery.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

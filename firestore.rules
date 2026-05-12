@@ -1,11 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global Safety Net
+    // 0. Global Safety Net
     match /{document=**} {
       allow read, write: if false;
     }
 
+    // Phase 3: Primitives
     function isSignedIn() {
       return request.auth != null;
     }
@@ -18,39 +19,54 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // --- Users Collection ---
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- 1. Users Collection (Hardened) ---
     match /users/{userId} {
       function isValidUser(data) {
         return data.keys().hasAll(['id', 'points', 'clearance', 'reputation'])
           && data.id == userId
           && data.points is number
           && data.clearance is number
-          && data.reputation is map;
+          && data.reputation is map
+          && data.reputation.positive is number
+          && data.reputation.negative is number;
       }
 
       allow get: if isSignedIn();
       allow list: if false; 
       
       allow create: if isOwner(userId) 
-        && isValidUser(request.resource.data)
-        && request.resource.data.points == 1000
-        && request.resource.data.clearance == 1;
+        && isValidUser(incoming())
+        && incoming().points == 1000
+        && incoming().clearance == 1;
 
       allow update: if isOwner(userId)
-        && isValidUser(request.resource.data)
+        && isValidUser(incoming())
         && (
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['points', 'clearance', 'reputation'])
-          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profile'])
+          // Allow profile changes
+          incoming().diff(existing()).affectedKeys().hasOnly(['profile']) ||
+          // Allow server-synced stats (client can't usually do this but we check keys)
+          incoming().diff(existing()).affectedKeys().hasOnly(['points', 'clearance', 'reputation'])
         );
     }
 
-    // --- Oracle Threads ---
+    // --- 2. Oracle Threads (Hardened) ---
     match /oracle_threads/{threadId} {
       function isValidThread(data) {
-        return data.keys().hasAll(['id', 'authorId', 'question', 'timestamp'])
-          && data.authorId == request.auth.uid
+        return data.keys().hasAll(['authorId', 'question', 'timestamp', 'isResolved', 'answerCount'])
+          && data.authorId is string
           && data.question is string 
           && data.question.size() <= 500
+          && data.timestamp is number
+          && data.isResolved is bool
+          && data.answerCount is number
           && (!('bounty' in data) || (data.bounty is number && data.bounty >= 0));
       }
 
@@ -58,21 +74,49 @@ service cloud.firestore {
       
       allow create: if isSignedIn() 
         && isValidId(threadId)
-        && isValidThread(request.resource.data)
-        && request.resource.data.timestamp == request.time.toMillis();
+        && isValidThread(incoming())
+        && incoming().authorId == request.auth.uid
+        && incoming().timestamp == request.time.toMillis()
+        && incoming().answerCount == 0;
       
       allow update: if isSignedIn()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers', 'isResolved'])
         && (
-          // Adding an answer
-          (request.resource.data.answers.size() > resource.data.answers.size())
-          || 
-          // Resolving (only by author)
-          (resource.data.authorId == request.auth.uid && request.resource.data.isResolved == true)
+          // Action: Resolve (Only by author)
+          (existing().authorId == request.auth.uid && incoming().isResolved == true && incoming().diff(existing()).affectedKeys().hasOnly(['isResolved']))
+          ||
+          // Action: Answer Increment (Atomic sync)
+          (incoming().answerCount == existing().answerCount + 1 && incoming().diff(existing()).affectedKeys().hasOnly(['answerCount']))
         );
+
+      // --- 3. Oracle Answers (Subcollection Hardened) ---
+      match /answers/{answerId} {
+        function isValidAnswer(data) {
+          return data.keys().hasAll(['authorId', 'text', 'timestamp', 'vouchCount'])
+            && data.authorId is string
+            && data.text is string
+            && data.text.size() <= 2000
+            && data.timestamp is number
+            && data.vouchCount is number;
+        }
+
+        allow read: if isSignedIn();
+
+        allow create: if isSignedIn()
+          && isValidAnswer(incoming())
+          && incoming().authorId == request.auth.uid
+          && incoming().timestamp == request.time.toMillis()
+          && incoming().vouchCount == 0
+          && getAfter(/databases/$(database)/documents/oracle_threads/$(threadId)).data.answerCount == get(/databases/$(database)/documents/oracle_threads/$(threadId)).data.answerCount + 1;
+
+        allow update: if isSignedIn()
+          && (
+            // Action: Vouch (Reputation boost)
+            (incoming().vouchCount == existing().vouchCount + 1 && incoming().diff(existing()).affectedKeys().hasOnly(['vouchCount']))
+          );
+      }
     }
 
-    // --- Network Stats ---
+    // --- 4. Network Stats (Public) ---
     match /network_stats/global {
       allow read: if true;
     }

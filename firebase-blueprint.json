@@ -27,25 +27,26 @@
         "id": { "type": "string" },
         "authorId": { "type": "string" },
         "question": { "type": "string" },
-        "answers": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" },
-              "authorId": { "type": "string" },
-              "text": { "type": "string" },
-              "timestamp": { "type": "number" },
-              "vouchCount": { "type": "number" }
-            }
-          }
-        },
         "bounty": { "type": "number" },
         "timestamp": { "type": "number" },
         "isResolved": { "type": "boolean" },
-        "tags": { "type": "array" }
+        "tags": { "type": "array" },
+        "answerCount": { "type": "number" }
       },
       "required": ["id", "authorId", "question", "timestamp"]
+    },
+    "OracleAnswer": {
+      "title": "Oracle Answer",
+      "description": "User responses to oracle threads.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authorId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "vouchCount": { "type": "number" }
+      },
+      "required": ["id", "authorId", "text", "timestamp"]
     }
   },
   "firestore": {
@@ -55,7 +56,11 @@
     },
     "oracle_threads/{threadId}": {
       "schema": "OracleThread",
-      "description": "Shared oracle threads with bounties and community answers."
+      "description": "Shared oracle threads with bounties."
+    },
+    "oracle_threads/{threadId}/answers/{answerId}": {
+      "schema": "OracleAnswer",
+      "description": "Responses to a specific thread."
     },
     "network_stats/global": {
       "schema": "object",

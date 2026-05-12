@@ -184,7 +184,7 @@ async function startServer() {
     socket.on('request_oracle', async () => {
        try {
          const snapshot = await db.collection('oracle_threads')
-           .orderBy('isResolved', 'asc') // Active first
+           .orderBy('isResolved', 'asc')
            .orderBy('bounty', 'desc') 
            .orderBy('timestamp', 'desc')
            .limit(40).get();
@@ -198,12 +198,30 @@ async function startServer() {
        }
     });
 
+    socket.on('request_thread_details', async (data) => {
+       try {
+         const threadRef = db.collection('oracle_threads').doc(data.threadId);
+         const answersSnap = await threadRef.collection('answers')
+           .orderBy('vouchCount', 'desc')
+           .orderBy('timestamp', 'asc')
+           .get();
+         
+         const answers = answersSnap.docs.map(doc => ({
+           id: doc.id,
+           ...doc.data()
+         }));
+         
+         socket.emit('thread_details', { threadId: data.threadId, answers });
+       } catch (error) {
+         console.error('[ORACLE] Error fetching thread details:', error);
+       }
+    });
+
     socket.on('post_oracle_thread', async (data) => {
        try {
          const actualUID = data.nodeId || uID;
          const bountyAmount = data.bounty || 0;
          
-         // 1. Check points if bounty is requested
          if (bountyAmount > 0) {
             const userRef = db.collection('users').doc(actualUID);
             const userSnap = await userRef.get();
@@ -217,10 +235,10 @@ async function startServer() {
          const newThread = {
             authorId: actualUID,
             question: data.question,
-            answers: [],
             timestamp: Date.now(),
             bounty: bountyAmount,
-            isResolved: false
+            isResolved: false,
+            answerCount: 0
          };
          await db.collection('oracle_threads').add(newThread);
          io.emit('oracle_updated');
@@ -233,22 +251,23 @@ async function startServer() {
        try {
          const actualUID = data.nodeId || uID;
          const threadRef = db.collection('oracle_threads').doc(data.threadId);
+         
+         const newAnswer = {
+            authorId: actualUID,
+            text: data.text,
+            timestamp: Date.now(),
+            vouchCount: 0
+         };
+
          await db.runTransaction(async (t) => {
-           const doc = await t.get(threadRef);
-           if (!doc.exists) return;
-           const thread = doc.data();
-           const answers = thread?.answers || [];
-           answers.push({
-              id: 'a' + Date.now(),
-              authorId: actualUID,
-              text: data.text,
-              timestamp: Date.now(),
-              vouchCount: 0
-           });
-           // Re-sort answers by vouchCount immediately
-           answers.sort((a: any, b: any) => (b.vouchCount || 0) - (a.vouchCount || 0));
-           t.update(threadRef, { answers });
+           const threadSnap = await t.get(threadRef);
+           if (!threadSnap.exists) return;
+           
+           const answerRef = threadRef.collection('answers').doc();
+           t.set(answerRef, newAnswer);
+           t.update(threadRef, { answerCount: admin.firestore.FieldValue.increment(1) });
          });
+         
          io.emit('oracle_updated');
        } catch (error) {
          console.error('[ORACLE] Error posting answer:', error);
@@ -258,23 +277,18 @@ async function startServer() {
     socket.on('vouch_answer', async (data) => {
        try {
          const threadRef = db.collection('oracle_threads').doc(data.threadId);
+         const answerRef = threadRef.collection('answers').doc(data.answerId);
+         
          await db.runTransaction(async (t) => {
-           const doc = await t.get(threadRef);
-           if (!doc.exists) return;
-           const thread = doc.data();
-           const answers = thread?.answers || [];
-           const answerIdx = answers.findIndex((a: any) => a.id === data.answerId);
-           if (answerIdx > -1) {
-              const answer = answers[answerIdx];
-              answer.vouchCount = (answer.vouchCount || 0) + 1;
-              
-              // AWARD REPUTATION TO AUTHOR
-              const authorRef = db.collection('users').doc(answer.authorId);
-              t.update(authorRef, { 'reputation.positive': admin.firestore.FieldValue.increment(1) });
-              
-              // Re-sort
-              answers.sort((a: any, b: any) => (b.vouchCount || 0) - (a.vouchCount || 0));
-              t.update(threadRef, { answers });
+           const answerSnap = await t.get(answerRef);
+           if (!answerSnap.exists) return;
+           
+           const answer = answerSnap.data();
+           t.update(answerRef, { vouchCount: admin.firestore.FieldValue.increment(1) });
+           
+           if (answer?.authorId) {
+             const authorRef = db.collection('users').doc(answer.authorId);
+             t.update(authorRef, { 'reputation.positive': admin.firestore.FieldValue.increment(1) });
            }
          });
          io.emit('oracle_updated');
@@ -291,12 +305,16 @@ async function startServer() {
 
          const threadData = threadSnap.data();
          const bounty = threadData?.bounty || 0;
-         const answers = threadData?.answers || [];
          
-         // 1. Find winner (highest vouchCount)
-         if (bounty > 0 && answers.length > 0) {
-            const winner = answers[0]; // Already sorted by vouchCount on post/vouch
-            if (winner && winner.authorId) {
+         if (bounty > 0) {
+            // Find top answer
+            const topAnswerSnap = await threadRef.collection('answers')
+               .orderBy('vouchCount', 'desc')
+               .limit(1)
+               .get();
+            
+            if (!topAnswerSnap.empty) {
+               const winner = topAnswerSnap.docs[0].data();
                const winnerRef = db.collection('users').doc(winner.authorId);
                await winnerRef.update({ points: admin.firestore.FieldValue.increment(bounty) });
             }

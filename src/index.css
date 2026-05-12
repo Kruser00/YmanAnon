@@ -12,6 +12,17 @@
     --phos-color: #ff9d00;
     --phos-dim: #3a1c00;
   }
+
+  /* Responsive Scaling */
+  @media (max-width: 640px) {
+    .text-yellow-400 {
+      font-size: 0.75rem !important; /* text-xs */
+    }
+    h2.fx-holo {
+      font-size: 1.125rem !important; /* text-lg */
+      letter-spacing: 0.1em !important;
+    }
+  }
 }
 
 body {
