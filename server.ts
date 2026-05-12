@@ -23,8 +23,6 @@ async function startServer() {
 
   // Helper matching logic
   const findMatch = (userId: string, prefs: any) => {
-    // In a real app we'd score based on mood/intent/reputation
-    // Here we'll do random match from queue
     const matchIndex = queue.findIndex(u => u.id !== userId);
     if (matchIndex > -1) {
       const partner = queue[matchIndex];
@@ -57,7 +55,14 @@ async function startServer() {
     });
 
     socket.on('join_pool', (data) => {
-      users.set(uID, { id: uID, mood: data.mood, intent: data.intent, points: Math.floor(Math.random() * 100) + 1000, currentRoom: null, profile: {} });
+      users.set(uID, { 
+         id: uID, 
+         mood: data.mood, 
+         intent: data.intent, 
+         profile: data.profile, // Contains { age, gender, city }
+         points: 1000, // Starts with 1000 for testing
+         currentRoom: null 
+      });
       
       const partner = findMatch(uID, data);
       if (partner) {
@@ -69,7 +74,8 @@ async function startServer() {
         activeChats.set(roomId, { 
            users: [uID, partner.id],
            topic: data.intent === partner.intent ? data.intent : 'Life choices',
-           createdAt: Date.now()
+           createdAt: Date.now(),
+           pendingReveals: {}
         });
         
         const userState = users.get(uID);
@@ -92,7 +98,6 @@ async function startServer() {
     socket.on('send_message', (data) => {
       const user = users.get(uID);
       if (user && user.currentRoom) {
-        // Broadcast to the room, excluding sender
         socket.to(user.currentRoom).emit('receive_message', {
           id: Date.now().toString(),
           sender: uID,
@@ -100,29 +105,68 @@ async function startServer() {
           timestamp: Date.now()
         });
         
-        // Reward points (simple version)
+        // Reward points
         user.points += 5;
         socket.emit('points_updated', { points: user.points, reason: '+5 msg' });
       }
     });
 
-    // Handle reveals (spending points)
-    socket.on('reveal_request', (data) => {
+    // Handle mutual reveals
+    socket.on('propose_reveal', (data) => {
       const user = users.get(uID);
-      if (user && user.currentRoom) {
-         if (user.points >= data.cost) {
-            user.points -= data.cost;
-            user.profile[data.type] = data.value;
-            socket.emit('points_updated', { points: user.points, reason: `-${data.cost} reveal` });
-            
-            // For now, unilaterally reveal to the room (simpler than mutual for demo)
-            io.to(user.currentRoom).emit('system_message', {
-               text: `Partner unlocked their ${data.type}: ${data.value}`
-            });
-         } else {
-            socket.emit('system_message', { text: `Insufficient points to unlock ${data.type}.` });
-         }
+      if (!user || !user.currentRoom) return;
+
+      const room = activeChats.get(user.currentRoom);
+      if (!room) return;
+
+      if (user.points < data.cost) {
+         socket.emit('system_message', { text: `Insufficient points to propose ${data.type} reveal.` });
+         return;
       }
+
+      // Mark as pending
+      room.pendingReveals[data.type] = {
+         proposedBy: uID,
+         cost: data.cost
+      };
+
+      // Notify the room
+      io.to(user.currentRoom).emit('system_message', {
+         text: `>>> MUTUAL REVEAL PROPOSED: ${data.type.toUpperCase()} (${data.cost} pts). Type /accept ${data.type} to unlock. <<<`,
+         revealProposal: data.type
+      });
+    });
+
+    socket.on('accept_reveal', (data) => {
+       const user = users.get(uID);
+       if (!user || !user.currentRoom) return;
+
+       const room = activeChats.get(user.currentRoom);
+       if (!room) return;
+
+       const pending = room.pendingReveals[data.type];
+       if (!pending || pending.proposedBy === uID) return; // Cant accept own request
+
+       if (user.points < pending.cost) {
+          socket.emit('system_message', { text: `Insufficient points to accept ${data.type} reveal.` });
+          return;
+       }
+
+       const proposerID = pending.proposedBy;
+       const proposer = users.get(proposerID);
+
+       // Deduct points
+       user.points -= pending.cost;
+       proposer.points -= pending.cost;
+
+       io.to(uID).emit('points_updated', { points: user.points });
+       io.to(proposerID).emit('points_updated', { points: proposer.points });
+
+       // Broadcast the actual profile data!
+       io.to(uID).emit('system_message', { text: `[REVEALED] Partner's ${data.type}: ${proposer.profile[data.type] || 'Unknown'}`});
+       io.to(proposerID).emit('system_message', { text: `[REVEALED] Partner's ${data.type}: ${user.profile[data.type] || 'Unknown'}`});
+       
+       delete room.pendingReveals[data.type];
     });
   });
 
