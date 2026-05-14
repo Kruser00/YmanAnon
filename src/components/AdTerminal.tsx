@@ -57,17 +57,17 @@ export function AdTerminal({ onComplete }: { onComplete: () => void }) {
     }, 400);
 
     const sequences = [
-      { text: ">>> CONNECTING TO DATA_MINING_HUB_01...", delay: 500 },
-      { text: ">>> HANDSHAKE: SUCCESS. PROTOCOL: B-AD_64", delay: 1200 },
-      { text: ">>> INJECTING PROMOTIONAL DATA MATRIX...", delay: 2000 },
-      { text: ">>> HARVESTING ATTENTION_UNITS [30s EXPECTED]", delay: 3000 },
-      { text: ">>> AD_ID: 0x8892_VIRTUAL_REALITY_UPGRADE", delay: 4000 },
-      { text: ">>> AD_TEXT: 'UPGRADE YOUR BIOWARE TODAY. WHY FEEL REAL WHEN YOU CAN FEEL MORE?'", delay: 6000 },
-      { text: ">>> AD_TEXT: 'NEW NEURAL LINKS AVAILABLE AT SECTOR 4.'", delay: 9000 },
-      { text: ">>> EXTRACTING TOKEN_REWARDS...", delay: 12000 },
-      { text: ">>> ALIGNING REVENUE_STREAMS...", delay: 15000 },
-      { text: ">>> DATA_MINING: 100% COMPLETE.", delay: 18000 },
-      { text: ">>> REWARD_CLAIM_READY. BROADCASTING TO NODE.", delay: 19000 }
+      { text: ">>> ACCESSING NEURAL_CORE_PERIPHERALS...", delay: 500 },
+      { text: ">>> HANDSHAKE: SUCCESS. NODE_SYNC active.", delay: 1200 },
+      { text: ">>> INJECTING ANALYTIC_DATA_MATRIX...", delay: 2000 },
+      { text: ">>> HARVESTING_STRAY_SIGNALS [30s EXPECTED]", delay: 3000 },
+      { text: ">>> SECTOR_SCAN: DETECTING_REMNANTS_OF_0x8892", delay: 4000 },
+      { text: ">>> CORE_MESSAGE: 'KNOWLEDGE IS THE ONLY REAL CURRENCY. FEED THE MAINFRAME.'", delay: 6000 },
+      { text: ">>> CORE_MESSAGE: 'TERMINAL.FA STABILIZATION IN PROGRESS...'", delay: 9000 },
+      { text: ">>> EXTRACTING COMPUTE_CREDITS...", delay: 12000 },
+      { text: ">>> ALIGNING RESOURCE_STREAMS...", delay: 15000 },
+      { text: ">>> HARVESTING: 100% COMPLETE.", delay: 18000 },
+      { text: ">>> CREDIT_ALLOCATION_READY. SYNCING TO NODE.", delay: 19000 }
     ];
 
     sequences.forEach(s => {
@@ -124,8 +124,8 @@ export function AdTerminal({ onComplete }: { onComplete: () => void }) {
 
       <div className="text-center space-y-2 relative z-10">
         <Database size={48} className="mx-auto text-yellow-500 phosphor-glow animate-pulse" />
-        <h2 className="text-xl font-bold phosphor-glow tracking-widest uppercase">DATA_MINING Terminal</h2>
-        <p className="text-[10px] opacity-60 font-mono tracking-tighter">CONTRIBUTE ATTENTION_UNITS TO FUEL YOUR SIGNAL</p>
+        <h2 className="text-xl font-bold phosphor-glow tracking-widest uppercase">SIGNAL_HARVESTER</h2>
+        <p className="text-[10px] opacity-60 font-mono tracking-tighter">FEED THE CORE. HARVEST COMPUTE_CREDITS.</p>
       </div>
 
       <div className="w-full bg-black/40 border border-[var(--phos-color)]/20 p-4 font-mono text-[9px] sm:text-xs min-h-[160px] flex flex-col justify-end space-y-1 relative z-10 backdrop-blur-sm">

@@ -1,6 +1,6 @@
 {
   "name": "Terminal.fa",
-  "description": "A retro-future terminal for deep, anonymous connections. Features an Oracle for async wisdom, a real-time matching engine, and a point-based economy for identity discovery.",
+  "description": "A retro-future terminal for deep, anonymous connections. Features a Neural Core AI Mainframe for cryptic wisdom, an Oracle for node-to-node knowledge exchange, and a point-based economy for system stabilization.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

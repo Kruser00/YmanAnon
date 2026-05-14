@@ -28,12 +28,12 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
   const totalMoods = (Object.values(atmosphere.moods).reduce((a: number, b: any) => a + (b as number), 0) || 1) as number;
 
   const infoDocs: Record<string, string> = {
-    'network': 'GLOBAL_MESH_STATUS. وضعیت شبکه جهانی. نمایش تمام کلاینت‌های فعال.',
-    'reputation': 'TRUST_QUOTIENT. شاخص اعتماد. اعتبار پایین ممکن است منجر به قرنطینه شود.',
-    'void': 'THE_VOID. پخش عمومی پیام‌های رها شده. از طریق /void ارسال کنید.',
-    'oracle': 'THE_ORACLE. مخزن دانش شبکه. سوال بپرسید یا به دیگران پاسخ دهید.',
-    'pot': 'SIGNAL_CONSERVATION. ذخیره سیگنال. مشارکت جمعی برای به تاخیر انداختن پاکسازی شبکه.',
-    'signal': 'SIGNAL_FUEL_GENERATOR. استخراج سیگنال. مشاهده تبلیغات برای دریافت امتیاز رایگان.'
+    'network': 'GLOBAL_MESH_STATUS. وضعیت شبکه جهانی. فعال‌سازی تمامی گره‌ها.',
+    'reputation': 'TRUST_QUOTIENT. شاخص اعتماد. اعتبار شما در هسته عصبی.',
+    'void': 'GLOBAL_BROADCAST. پخش عمومی سیگنال‌های صوتی. خروجی در تمام ترمینال‌ها.',
+    'oracle': 'NEURAL_CORE_ACCESS. دسترسی به هوش مرکزی و شبکه دانش کاربران.',
+    'pot': 'RESOURCE_CONSERVATION. ذخیره منابع. مشارکت جمعی برای به تاخیر انداختن بازنشانی سیستم.',
+    'signal': 'SIGNAL_HARVESTER. برداشت امتیاز برای فعالیت در هسته عصبی.'
   };
 
   return (
@@ -83,20 +83,20 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
             animate={{ x: 0, opacity: 1 }}
             className="text-[9px] sm:text-[10px] uppercase tracking-tighter text-yellow-400 font-sans w-full leading-tight"
           >
-            SYS.INFO &gt; {infoDocs[activeInfo]}
+            MAINFRAME.SYS &gt; {infoDocs[activeInfo]}
           </motion.div>
         ) : (
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-green-500/40 rounded-full animate-pulse" />
-            <span className="text-[9px] uppercase tracking-tighter opacity-30 font-mono">STATION.IDLE // INTERROGATE SYSTEM SUBSYSTEMS</span>
+            <span className="text-[9px] uppercase tracking-tighter opacity-30 font-mono">NEURAL_CORE_IDLE // ACCESSING_PERIPHERALS_0x9</span>
           </div>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-1 py-1 sm:overflow-visible scrollbar-hide">
       <div className="mb-4 sm:mb-8 text-center border-b border-[var(--phos-color)]/30 pb-4 relative z-10 p-2 sm:p-4">
-        <h2 className="text-xl sm:text-3xl fx-holo mb-1 uppercase tracking-[0.2em]">&gt; NETWORK STATUS</h2>
-        <div className="text-[10px] sm:text-xs phosphor-dim mb-2 uppercase tracking-widest font-fa">وضعیت شبکه</div>
+        <h2 className="text-xl sm:text-3xl fx-holo mb-1 uppercase tracking-[0.2em]">&gt; MAINFRAME STATUS</h2>
+        <div className="text-[10px] sm:text-xs phosphor-dim mb-2 uppercase tracking-widest font-fa">وضعیت سیستم مرکزی</div>
         <div className="flex flex-wrap gap-2 sm:gap-4 justify-center items-center mt-2 text-[9px] sm:text-sm">
           <div 
             onClick={() => { audioService.playKeystroke(); setActiveInfo(activeInfo === 'network' ? null : 'network'); }}
@@ -108,7 +108,7 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
             )}
           >
             <User size={12} className="text-[var(--phos-color)]" />
-             <span className="phosphor-glow font-mono uppercase">{atmosphere.online > 999 ? (atmosphere.online/1000).toFixed(1) + 'k' : atmosphere.online} NODES</span>
+             <span className="phosphor-glow font-mono uppercase">{atmosphere.online > 999 ? (atmosphere.online/1000).toFixed(1) + 'k' : atmosphere.online} ACTIVE_NODES</span>
           </div>
           <div 
             onClick={() => { audioService.playKeystroke(); setActiveInfo(activeInfo === 'reputation' ? null : 'reputation'); }}
@@ -128,8 +128,8 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
       <div className="mb-6 sm:mb-12 relative z-10 px-4 flex flex-col md:flex-row gap-6 sm:gap-8">
         <div className="flex-1">
           <h3 className="phosphor-dim uppercase text-[10px] mb-2 sm:mb-4 tracking-widest flex justify-between items-center pr-4">
-            <span>&gt; ATMOSPHERE CALIBRATION</span>
-            <span className="font-sans">کالیبراسیون جو</span>
+            <span>&gt; NEURAL ATMOSPHERE</span>
+            <span className="font-sans">جو عصبی</span>
           </h3>
           <div className="space-y-1 sm:space-y-2 font-mono text-[9px] min-h-[100px] sm:min-h-[140px] max-h-[140px] overflow-y-auto overflow-x-hidden pr-2 scrollbar-hide">
             {Object.entries(atmosphere.moods).length === 0 ? (
@@ -141,7 +141,7 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
                      <div className="w-6 h-2 bg-[var(--phos-color)]/20" />
                    </div>
                  ))}
-                 <div className="text-[7px] italic mt-2">CALIBRATING_SENSORS...</div>
+                 <div className="text-[7px] italic mt-2">ANALYZING_NODE_STREAMS...</div>
                </div>
             ) : Object.entries(atmosphere.moods).map(([mood, count]: [string, any]) => {
               const pct = Math.round(((count as number) / totalMoods) * 100);
@@ -187,8 +187,8 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
             )}
           >
             <div className="flex justify-between items-center border-b border-yellow-500/20 pb-1 mb-2">
-              <h3 className="text-yellow-500 uppercase text-[9px] sm:text-[10px] tracking-widest font-bold">Signal Conservation Pot</h3>
-              <div className="text-[7px] text-yellow-500/50">COOPERATIVE_DELAY</div>
+              <h3 className="text-yellow-500 uppercase text-[9px] sm:text-[10px] tracking-widest font-bold">RESOURCE_CONSERVATION_POOL</h3>
+              <div className="text-[7px] text-yellow-500/50">SYSTEM_STABILIZATION</div>
             </div>
             
             <div className="flex items-end justify-between mb-2">
@@ -213,13 +213,13 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
                   ))}
                 </div>
                 <span className="text-sm sm:text-2xl font-mono text-yellow-500 font-bold phosphor-glow leading-none">{purgePotTotal}</span>
-                <span className="text-[8px] uppercase opacity-50 font-mono tracking-tighter">GLOBAL_SIGNAL_RESERVE</span>
+                <span className="text-[8px] uppercase opacity-50 font-mono tracking-tighter">GLOBAL_STABILITY_INDEX</span>
               </div>
               <button 
                 onClick={(e) => { e.stopPropagation(); setIsContributing(!isContributing); }}
                 className="bg-yellow-500 text-black text-[10px] px-3 py-2 uppercase tracking-tighter hover:bg-yellow-400 transition-all font-bold shadow-[0_0_15px_rgba(234,179,8,0.2)] active:scale-95"
               >
-                {isContributing ? '[ CANCEL ]' : 'ALLOCATE CREDITS'}
+                {isContributing ? '[ ABORT ]' : 'ALLOCATE'}
               </button>
             </div>
 
@@ -230,12 +230,12 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
                     <span className="flex-1 text-center font-mono text-xs text-yellow-500">{contributeAmount}</span>
                     <button onClick={(e) => { e.stopPropagation(); setContributeAmount(contributeAmount + 100); }} className="w-6 h-6 border border-yellow-500/30 flex items-center justify-center hover:bg-yellow-500/20">+</button>
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); handleContribute(); }} className="bg-yellow-500/20 border border-yellow-500/50 text-yellow-500 text-[9px] px-2 py-1 uppercase hover:bg-yellow-500/40">Confirm</button>
+                  <button onClick={(e) => { e.stopPropagation(); handleContribute(); }} className="bg-yellow-500/20 border border-yellow-500/50 text-yellow-500 text-[9px] px-2 py-1 uppercase hover:bg-yellow-500/40">Inject</button>
                </div>
             )}
 
             <div className="text-[7px] sm:text-[8px] opacity-40 font-sans italic">
-              "Every credit prolongs our existence in this RAM cache..."
+              "System maintenance is everyone's responsibility."
             </div>
           </div>
 
@@ -249,7 +249,7 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
             )}
           >
             <div className="flex justify-between items-center border-b border-[var(--phos-color)]/20 pb-1 mb-2">
-              <h3 className="phosphor-dim uppercase text-[10px] tracking-widest">The Void</h3>
+              <h3 className="phosphor-dim uppercase text-[10px] tracking-widest font-mono">GLOBAL_BROADCAST</h3>
               <div className="text-[8px] animate-pulse">LIVE</div>
             </div>
             <div className="flex-1 space-y-2 sm:space-y-3 overflow-y-auto max-h-[60px] sm:max-h-[80px] scrollbar-hide">
@@ -279,8 +279,8 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
         >
            <Eye size={18} className="text-[var(--phos-color)] group-hover:animate-pulse" />
            <div className="flex flex-col items-start sm:items-center">
-             <span className="uppercase tracking-widest text-sm sm:text-base relative z-10">The Oracle</span>
-             <span className="font-sans text-xs sm:text-sm text-[var(--phos-color)]/80 relative z-10">اوراکل</span>
+             <span className="uppercase tracking-widest text-sm sm:text-base relative z-10">NEURAL_CORE</span>
+             <span className="font-sans text-xs sm:text-sm text-[var(--phos-color)]/80 relative z-10">دسترسی به هسته</span>
            </div>
         </button>
         <button 
@@ -291,8 +291,8 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
         >
            <Heart size={18} className="text-[var(--phos-color)] group-hover:animate-pulse" />
            <div className="flex flex-col items-start sm:items-center">
-             <span className="uppercase tracking-widest text-sm sm:text-base relative z-10 font-bold">Connect</span>
-             <span className="font-sans text-xs sm:text-sm text-[var(--phos-color)]/80 relative z-10">ایجاد ارتباط</span>
+             <span className="uppercase tracking-widest text-sm sm:text-base relative z-10 font-bold">NODE_CONNECT</span>
+             <span className="font-sans text-xs sm:text-sm text-[var(--phos-color)]/80 relative z-10">اتصال گره‌ها</span>
            </div>
         </button>
       </div>
@@ -306,8 +306,8 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
         >
            <Terminal size={14} className="text-yellow-500 group-hover:animate-bounce" />
            <div className="flex flex-col items-start text-left">
-             <span className="uppercase tracking-widest text-xs sm:text-sm text-yellow-500 font-bold leading-tight">Signal Mine [REWARD_STATION]</span>
-             <span className="text-[8px] sm:text-[9px] text-yellow-500/60 leading-none">FUEL_YOUR_SIGNAL_BY_CONTRIBUTING_ATTENTION</span>
+             <span className="uppercase tracking-widest text-xs sm:text-sm text-yellow-500 font-bold leading-tight">SIGNAL_HARVESTER [0x99]</span>
+             <span className="text-[8px] sm:text-[9px] text-yellow-500/60 leading-none">EXTRACT_COMPUTE_CREDITS_FROM_NOISE</span>
            </div>
            <div className="ml-auto text-yellow-500 font-bold text-xs sm:text-sm phosphor-glow animate-pulse">+250</div>
         </button>

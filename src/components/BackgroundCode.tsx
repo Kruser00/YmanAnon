@@ -13,6 +13,7 @@ export function BackgroundCode({ mood }: { mood?: string | null }) {
   
   const instructions = ['LOAD', 'STORE', 'JMP', 'CALL', 'RET', 'PUSH', 'POP', 'ADD', 'SUB', 'XOR', 'CMP', 'SYS.ALLOC', 'SYS.FREE', 'MOV', 'NOP', 'INT', 'HALT', 'STI', 'CLI', 'SHL', 'SHR'];
   const registers = ['REG_A', 'REG_B', 'REG_X', 'REG_Y', 'EAX', 'EBX', 'ECX', 'EDX', 'ESI', 'EDI', 'EBP', 'ESP', 'FLAGS'];
+  const structures = ['[CORE_DUMP]', '[NEURAL_SYNAPSE]', '[HASH_TABLE]', '[BUFFER_OUTF]', '[PACKET_TRACE]', '[SIGNAL_STREAM]'];
 
   useEffect(() => {
     const isMobile = window.innerWidth < 640;
@@ -21,14 +22,17 @@ export function BackgroundCode({ mood }: { mood?: string | null }) {
       const instr = instructions[Math.floor(Math.random() * instructions.length)];
       const reg = registers[Math.floor(Math.random() * registers.length)];
       const val = `0x${Math.floor(Math.random() * 0xFFFF).toString(16).toUpperCase()}`;
+      const struct = structures[Math.floor(Math.random() * structures.length)];
       
       let newLine = `${addr} ${instr} ${reg}, ${val}`;
       const crit = Math.random();
-      if (crit < 0.05 && mood) newLine = `${addr} CRITICAL_EMOTION_${mood.toUpperCase()}`;
-      else if (crit < 0.15) newLine = `${addr} ERR_MEM_LEAK_AT_${val}`;
+      if (crit < 0.05 && mood) newLine = `${addr} CRITICAL_EMOTION_${mood.toUpperCase()} ${struct}`;
+      else if (crit < 0.12) newLine = `${addr} ERR_MEM_LEAK_AT_${val} ${struct}`;
+      else if (crit < 0.18) newLine = `${addr} ANALYZING_SIGNAL_${val}... OK`;
+      else if (crit < 0.22) newLine = `${addr} FETCHING_CORE_PROTOCOL_${val.slice(0,3)}`;
 
-      setLeakedLines(prev => [...prev.slice(isMobile ? -40 : -80), newLine]);
-    }, isMobile ? 400 : 250);
+      setLeakedLines(prev => [...prev.slice(isMobile ? -50 : -100), newLine]);
+    }, isMobile ? 350 : 200);
 
     return () => clearInterval(interval);
   }, [mood]);

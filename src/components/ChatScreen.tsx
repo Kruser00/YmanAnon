@@ -21,6 +21,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const emojis = ['🔥', '👍', '❤️', '😂', '😮', '💀'];
 
   useEffect(() => {
+    if (!roomId) return;
+    
     const handleTimerSync = (data: any) => {
        setTimerExpiresAt(data.expiresAt);
     };
@@ -29,7 +31,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     return () => {
       socketService.off('chat_timer_sync', handleTimerSync);
     };
-  }, []);
+  }, [roomId]);
 
   useEffect(() => {
     if (!timerExpiresAt) return;
@@ -48,6 +50,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   };
 
   useEffect(() => {
+    if (!roomId) return;
+
     // Add initial system message
     setMessages([{
       id: 'sys-1',
@@ -67,7 +71,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     };
 
     const handlePartnerDisconnect = () => {
-      setMessages(prev => [...prev, { id: 'sys-dis', text: 'PARTNER HAS DISCONNECTED.', isSelf: false, system: true }]);
+      setMessages(prev => [...prev, { id: 'sys-dis', text: 'PARTNER HAS DISCONNECTED. / هم‌صحبت شما از محیط گفتگو خارج شد.', isSelf: false, system: true }]);
     };
 
     const handleMessageUpdate = (data: any) => {
@@ -98,7 +102,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       socketService.off('message_updated', handleMessageUpdate);
       socketService.off('receive_reaction', handleReceiveReaction);
     };
-  }, [topic]);
+  }, [topic, roomId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -144,6 +148,12 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     setInput('');
   };
 
+  if (!roomId) return (
+    <div className="flex items-center justify-center h-full font-mono animate-pulse">
+        &gt; INITIALIZING_CHAT_PROTOCOLS...
+    </div>
+  );
+
   return (
     <div className={`flex flex-col h-full bg-[var(--bg-color)] border border-[var(--phos-color)]/20 max-w-4xl mx-auto shadow-[0_0_20px_rgba(0,0,0,0.5)] relative overflow-hidden ${secondsRemaining !== null && secondsRemaining < 15 ? 'fx-jitter' : ''}`}>
       {/* Intense red flash for emergency */}
@@ -161,7 +171,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       {secondsRemaining !== null && (
         <div className="absolute top-2 left-2 flex items-center gap-2 z-30 bg-black/60 backdrop-blur-sm p-1 px-2 border border-yellow-500/30">
           <div className="flex flex-col">
-            <span className="text-[8px] uppercase tracking-tighter text-yellow-500/70 font-mono">Memory Decay</span>
+            <span className="text-[8px] uppercase tracking-tighter text-yellow-500/70 font-mono">Memory Decay / زوال حافظه</span>
             <span className={cn(
                "text-xs sm:text-sm font-bold font-mono phosphor-glow leading-none",
                secondsRemaining < 30 ? "text-red-500 fx-jitter" : "text-yellow-500"
@@ -174,7 +184,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             disabled={points < 200}
             className="bg-yellow-500/10 border border-yellow-500/40 text-yellow-500 text-[8px] px-1.5 py-1 uppercase hover:bg-yellow-500/20 disabled:opacity-30 transition-all font-bold ml-1"
           >
-            Delay (200)
+            Delay (200) / تمدید
           </button>
         </div>
       )}
@@ -295,7 +305,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                   onClick={() => setShowEmojiPicker(showEmojiPicker === m.id ? null : m.id)} 
                   className="text-[8px] uppercase px-1 hover:bg-[var(--phos-color)]/20"
                 >
-                  React
+                  React / واکنش
                 </button>
                 
                 {/* Boost Controls for self messages */}

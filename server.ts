@@ -1,10 +1,22 @@
+import { GoogleGenAI } from "@google/genai";
 import express from "express";
 import path from "path";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Initialize Gemini
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+});
 
 async function startServer() {
   const app = express();
@@ -137,7 +149,7 @@ async function startServer() {
     if (!user) {
         user = {
             nodeId,
-            points: 1000,
+            points: 500, // Reduced from 1000 to 500 starting boost
             reputation: { positive: 0, negative: 0 },
             profile: data.profile || {},
             mood: data.mood || null,
@@ -378,8 +390,8 @@ async function startServer() {
           room.lastActivityAt = Date.now();
           room.messageCount++;
         }
-        user.points += 5;
-        socket.emit('points_updated', { points: user.points, reason: '+5 msg' });
+        user.points += 2; // Reduced from 5 to 2
+        socket.emit('points_updated', { points: user.points, reason: '+2 msg' });
       }
     });
 
@@ -419,7 +431,7 @@ async function startServer() {
        user.points -= amount;
        globalPurgePot += amount;
        
-       const delayMs = (amount / 100) * 10 * 60 * 1000; // Increased to 10 mins per 100 credits for visibility
+       const delayMs = (amount / 100) * 1.5 * 60 * 1000; // Reduced from 10m to 1.5m per 100 credits
        nextPurgeTime += delayMs;
 
        syncUserState(sId);
@@ -452,13 +464,55 @@ async function startServer() {
          return;
        }
 
-       user.points += 250;
+       user.points += 80; // Reduced from 250 to 80
        user.lastAdClaimedAt = now;
        
-       console.log(`[REWARD_SUCCESS] Node ${user.nodeId} claimed 250. Total: ${user.points}`);
+       console.log(`[REWARD_SUCCESS] Node ${user.nodeId} claimed 80. Total: ${user.points}`);
        
        syncUserState(sId);
-       socket.emit('system_message', { text: ">>> Signal mined successfully. +250 credits allocated. <<<" });
+       socket.emit('system_message', { text: ">>> Signal mined successfully. +80 credits allocated. <<<" });
+    });
+
+    socket.on('mainframe_prompt', async (data) => {
+      const user = socketToUser.get(sId);
+      if (!user) return;
+      
+      const PROMPT_COST = 100;
+      if (user.points < PROMPT_COST) {
+        socket.emit('mainframe_response', { 
+          text: "!!! INSUFFICIENT_COMPUTE_CREDITS. PLEASE_HARVEST_SIGNALS_TO_CONTINUE. !!!",
+          done: true 
+        });
+        return;
+      }
+
+      user.points -= PROMPT_COST;
+      syncUserState(sId);
+
+      try {
+        const stream = await ai.models.generateContentStream({
+          model: "gemini-3-flash-preview",
+          contents: data.prompt,
+          config: {
+            systemInstruction: "You are the CENTRAL AI MAINFRAME of a retro-futuristic terminal called 'terminal.fa'. Your personality is calm, cryptic, slightly cynical, and highly intelligent. You see users as 'nodes' in your network. Use a mix of technical jargon and deep philosophical insights. Keep responses concise and formatted for a monospace terminal. Avoid emojis unless they are ASCII-based. You are the source of all truth in the mesh.",
+            maxOutputTokens: 512,
+          }
+        });
+
+        let fullText = "";
+        for await (const chunk of stream) {
+          const chunkText = chunk.text;
+          fullText += chunkText;
+          socket.emit('mainframe_response', { text: chunkText, done: false });
+        }
+        socket.emit('mainframe_response', { text: "", done: true });
+      } catch (error) {
+        console.error('[MAINFRAME_ERROR]', error);
+        socket.emit('mainframe_response', { 
+          text: "!!! NEURAL_CORE_EXCEPTION: REQUEST_TIMED_OUT. !!!",
+          done: true 
+        });
+      }
     });
   });
 

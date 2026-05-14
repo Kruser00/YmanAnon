@@ -15,7 +15,9 @@ export function OracleScreen({ onBack, nodeId, points }: { onBack: () => void, n
   const [activeThread, setActiveThread] = useState<any | null>(null);
   const [input, setInput] = useState('');
   const [bounty, setBounty] = useState(0);
-  const [filter, setFilter] = useState<'active' | 'archive'>('active');
+  const [filter, setFilter] = useState<'active' | 'archive' | 'ai'>('ai');
+  const [aiChat, setAiChat] = useState<{ role: 'user' | 'ai', text: string }[]>([]);
+  const [isAiLoading, setIsAiLoading] = useState(false);
 
   useEffect(() => {
      socketService.emit('request_oracle', {});
@@ -32,12 +34,43 @@ export function OracleScreen({ onBack, nodeId, points }: { onBack: () => void, n
        }
      });
 
+     socketService.on('mainframe_response', (data) => {
+       setIsAiLoading(false);
+       setAiChat(prev => {
+         const last = prev[prev.length - 1];
+         if (last && last.role === 'ai' && !data.done) {
+           return [...prev.slice(0, -1), { role: 'ai', text: last.text + data.text }];
+         }
+         if (data.text) {
+           return [...prev, { role: 'ai', text: data.text }];
+         }
+         return prev;
+       });
+     });
+
      return () => {
-       socketService.off('oracle_data', () => {});
-       socketService.off('thread_details', () => {});
-       socketService.off('oracle_updated', () => {});
+       socketService.off('oracle_data');
+       socketService.off('thread_details');
+       socketService.off('oracle_updated');
+       socketService.off('mainframe_response');
      };
   }, [activeThread?.id]);
+
+  const handleAiPrompt = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (input.trim() && !isAiLoading) {
+      if (points < 100) {
+        setAiChat(prev => [...prev, { role: 'ai', text: "!!! ERROR: INSUFFICIENT_CREDITS. REQUIRES 100 CREDITS. !!!" }]);
+        return;
+      }
+      audioService.playKeystroke();
+      const prompt = input;
+      setAiChat(prev => [...prev, { role: 'user', text: prompt }]);
+      setIsAiLoading(true);
+      socketService.emit('mainframe_prompt', { prompt: prompt });
+      setInput('');
+    }
+  };
 
   useEffect(() => {
     if (activeThread && !activeThread.answers) {
@@ -86,33 +119,89 @@ export function OracleScreen({ onBack, nodeId, points }: { onBack: () => void, n
       exit={{ opacity: 0 }}
       className="flex flex-col h-full max-w-4xl mx-auto relative px-2 sm:px-0"
     >
-       <div className="absolute -top-2 right-0 flex gap-2 z-20">
-         <button 
-           onClick={() => { audioService.playKeystroke(); setFilter(filter === 'active' ? 'archive' : 'active'); }}
-           className={cn(
-             "p-2 text-[10px] font-mono uppercase border transition-colors",
-             filter === 'archive' ? "bg-[var(--phos-color)] text-black border-[var(--phos-color)]" : "hover:bg-[var(--phos-color)]/20 border-[var(--phos-color)]/30 text-[var(--phos-color)] bg-black/60"
-           )}
-         >
-            {filter === 'active' ? <Database size={12} className="inline mr-1" /> : <TrendingUp size={12} className="inline mr-1" />}
-            {filter === 'active' ? 'Archive' : 'Active'}
-         </button>
-         <button onClick={() => { audioService.playKeystroke(); onBack(); }} className="p-2 hover:bg-[var(--phos-color)]/20 text-[10px] font-mono uppercase border border-[var(--phos-color)]/30 text-red-400 bg-black/60">
-            &lt; Return
-         </button>
-       </div>
+        <div className="absolute -top-2 right-0 flex gap-1 sm:gap-2 z-20">
+          <button 
+            onClick={() => { audioService.playKeystroke(); setFilter('ai'); setActiveThread(null); }}
+            className={cn(
+              "px-2 py-1 text-[9px] sm:text-[10px] font-mono uppercase border transition-colors",
+              filter === 'ai' ? "bg-[var(--phos-color)] text-black border-[var(--phos-color)]" : "hover:bg-[var(--phos-color)]/20 border-[var(--phos-color)]/30 text-[var(--phos-color)] bg-black/60"
+            )}
+          >
+             NEURAL_CORE
+          </button>
+          <button 
+            onClick={() => { audioService.playKeystroke(); setFilter('active'); setActiveThread(null); }}
+            className={cn(
+              "px-2 py-1 text-[9px] sm:text-[10px] font-mono uppercase border transition-colors",
+              filter === 'active' ? "bg-[var(--phos-color)] text-black border-[var(--phos-color)]" : "hover:bg-[var(--phos-color)]/20 border-[var(--phos-color)]/30 text-[var(--phos-color)] bg-black/60"
+            )}
+          >
+             ORACLE
+          </button>
+          <button 
+            onClick={() => { audioService.playKeystroke(); setFilter('archive'); setActiveThread(null); }}
+            className={cn(
+              "px-2 py-1 text-[9px] sm:text-[10px] font-mono uppercase border transition-colors",
+              filter === 'archive' ? "bg-[var(--phos-color)] text-black border-[var(--phos-color)]" : "hover:bg-[var(--phos-color)]/20 border-[var(--phos-color)]/30 text-[var(--phos-color)] bg-black/60"
+            )}
+          >
+             ARCHIVE
+          </button>
+          <button onClick={() => { audioService.playKeystroke(); onBack(); }} className="px-2 py-1 hover:bg-[var(--phos-color)]/20 text-[9px] sm:text-[10px] font-mono uppercase border border-[var(--phos-color)]/30 text-red-400 bg-black/60">
+             &lt; OUT
+          </button>
+        </div>
 
-       <div className="border-b border-[var(--phos-color)]/30 pb-3 mb-4 mt-8 sm:mt-0">
-          <h2 className="text-xl sm:text-2xl phosphor-glow uppercase tracking-widest flex items-center gap-2">
-            {filter === 'active' ? <Eye size={20} /> : <Database size={20} />} 
-            {filter === 'active' ? 'THE ORACLE / اوراکل' : 'GLOBAL ARCHIVE / آرشیو'}
-          </h2>
-          <p className="phosphor-dim text-[10px] sm:text-sm font-mono mt-1 uppercase">
-            {filter === 'active' ? '> Knowledge exchange. / تبادل دانش.' : '> Verified wisdom. / اطلاعات تایید شده.'}
-          </p>
-       </div>
+        <div className="border-b border-[var(--phos-color)]/30 pb-3 mb-4 mt-12 sm:mt-0">
+           <h2 className="text-xl sm:text-2xl phosphor-glow uppercase tracking-widest flex items-center gap-2">
+             {filter === 'ai' ? <Award size={20} className="animate-pulse" /> : filter === 'active' ? <Eye size={20} /> : <Database size={20} />} 
+             {filter === 'ai' ? 'NEURAL CORE / هسته عصبی' : filter === 'active' ? 'THE ORACLE / اوراکل' : 'GLOBAL ARCHIVE / آرشیو'}
+           </h2>
+           <p className="phosphor-dim text-[10px] sm:text-[12px] font-mono mt-1 uppercase">
+             {filter === 'ai' ? '> Accessing central mainframe intelligence. (100 pts/query)' : filter === 'active' ? '> Knowledge exchange between nodes.' : '> Verified wisdom archive.'}
+           </p>
+        </div>
 
-       {!activeThread ? (
+        {filter === 'ai' ? (
+          <div className="flex flex-col flex-1 overflow-hidden min-h-0 font-mono">
+            <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1 scrollbar-hide pb-20">
+              {aiChat.length === 0 && (
+                <div className="opacity-40 text-center py-20 italic text-sm">
+                  -- SYSTEM READY. AWAITING DATA INPUT FROM NODE ${nodeId?.substring(0,6)} --
+                </div>
+              )}
+              {aiChat.map((msg, i) => (
+                <div key={i} className={cn(
+                  "p-3 border",
+                  msg.role === 'user' ? "border-[var(--phos-color)]/20 bg-black/20 ml-8" : "border-white/10 bg-white/5 mr-8"
+                )}>
+                  <div className="text-[9px] uppercase opacity-50 mb-1">
+                    {msg.role === 'user' ? `> NODE_${nodeId?.substring(0,6)}` : '> NEURAL_CORE'}
+                  </div>
+                  <div className={cn(
+                    "text-xs sm:text-sm leading-relaxed",
+                    msg.role === 'ai' ? "phosphor-glow" : ""
+                  )}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              {isAiLoading && <div className="text-[var(--phos-color)] animate-pulse">&gt; PROCESSING_REQUEST...</div>}
+            </div>
+            
+            <form onSubmit={handleAiPrompt} className="absolute bottom-4 left-0 right-0 flex gap-2 bg-black py-2">
+               <input 
+                  type="text" 
+                  value={input}
+                  onChange={e => { audioService.playKeystroke(); setInput(e.target.value) }}
+                  placeholder="Ask the Mainframe... / پرسش از هسته..."
+                  className="flex-1 bg-transparent border border-[var(--phos-color)]/30 p-2 sm:p-3 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] text-xs sm:text-sm"
+                  autoFocus 
+               />
+               <button type="submit" disabled={!input || isAiLoading} className="border border-[var(--phos-color)] px-4 sm:px-6 uppercase text-xs sm:text-sm hover:bg-[var(--phos-color)]/20 disabled:opacity-30">ASK</button>
+            </form>
+          </div>
+        ) : !activeThread ? (
          <div className="flex flex-col flex-1 overflow-hidden min-h-0">
            {filter === 'active' && (
              <form onSubmit={handlePostThread} className="mb-4 sm:mb-6 flex flex-col gap-2 border border-[var(--phos-color)]/10 p-3 bg-black/20">

@@ -93,7 +93,7 @@ export default function App() {
     socketService.on('global_purge_executed', () => {
       // Clear local non-persistent UI states if needed
       setVoidMessages([]);
-      setPoints(1000); // Reset to base points if server wiped
+      // Points will be updated via user_state_sync from server
       setReputation({ positive: 0, negative: 0 });
       setAppState(current => (current === 'CHAT' || current === 'MATCHING' ? 'DASHBOARD' : current));
     });
