@@ -10,7 +10,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function OracleScreen({ onBack, clearance, nodeId, points }: { onBack: () => void, clearance: number, nodeId: string | null, points: number }) {
+export function OracleScreen({ onBack, nodeId, points }: { onBack: () => void, nodeId: string | null, points: number }) {
   const [threads, setThreads] = useState<any[]>([]);
   const [activeThread, setActiveThread] = useState<any | null>(null);
   const [input, setInput] = useState('');
@@ -105,10 +105,10 @@ export function OracleScreen({ onBack, clearance, nodeId, points }: { onBack: ()
        <div className="border-b border-[var(--phos-color)]/30 pb-3 mb-4 mt-8 sm:mt-0">
           <h2 className="text-xl sm:text-2xl phosphor-glow uppercase tracking-widest flex items-center gap-2">
             {filter === 'active' ? <Eye size={20} /> : <Database size={20} />} 
-            {filter === 'active' ? 'THE ORACLE' : 'GLOBAL ARCHIVE'}
+            {filter === 'active' ? 'THE ORACLE / اوراکل' : 'GLOBAL ARCHIVE / آرشیو'}
           </h2>
-          <p className="phosphor-dim text-[10px] sm:text-sm font-mono mt-1">
-            {filter === 'active' ? '> Knowledge exchange for points and reputation.' : '> Permanent fragments of verified wisdom.'}
+          <p className="phosphor-dim text-[10px] sm:text-sm font-mono mt-1 uppercase">
+            {filter === 'active' ? '> Knowledge exchange. / تبادل دانش.' : '> Verified wisdom. / اطلاعات تایید شده.'}
           </p>
        </div>
 
@@ -120,8 +120,9 @@ export function OracleScreen({ onBack, clearance, nodeId, points }: { onBack: ()
                   type="text" 
                   value={input}
                   onChange={e => { audioService.playKeystroke(); setInput(e.target.value) }}
-                  placeholder="Ask a question to the mesh..."
-                  className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] font-mono text-xs sm:text-sm"
+                  placeholder="Ask a question to the mesh... / سوال از شبکه..."
+                  className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] font-sans text-xs sm:text-sm"
+                  dir="auto"
                />
                <div className="flex justify-between items-center mt-1">
                  <div className="flex items-center gap-2">

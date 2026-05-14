@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { clsx } from 'clsx';
 import { type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -7,7 +8,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function BackgroundCode({ mood, corruption = 0 }: { mood?: string | null, corruption?: number }) {
+export function BackgroundCode({ mood }: { mood?: string | null }) {
   const [leakedLines, setLeakedLines] = useState<string[]>([]);
   
   const instructions = ['LOAD', 'STORE', 'JMP', 'CALL', 'RET', 'PUSH', 'POP', 'ADD', 'SUB', 'XOR', 'CMP', 'SYS.ALLOC', 'SYS.FREE', 'MOV', 'NOP', 'INT', 'HALT', 'STI', 'CLI', 'SHL', 'SHR'];
@@ -27,21 +28,21 @@ export function BackgroundCode({ mood, corruption = 0 }: { mood?: string | null,
       else if (crit < 0.15) newLine = `${addr} ERR_MEM_LEAK_AT_${val}`;
 
       setLeakedLines(prev => [...prev.slice(isMobile ? -40 : -80), newLine]);
-    }, isMobile ? 400 : (250 - (corruption * 20)));
+    }, isMobile ? 400 : 250);
 
     return () => clearInterval(interval);
-  }, [mood, corruption]);
+  }, [mood]);
 
   return (
     <div className={cn(
       "absolute inset-0 overflow-hidden pointer-events-none z-0 opacity-10",
-      corruption > 3 ? "fx-jitter" : "",
-      corruption > 0 ? "blur-[0.6px]" : "blur-[0.2px]"
+      "blur-[0.2px]"
     )}>
-      <div className={cn(
-        "flex flex-col font-mono text-[8px] sm:text-[9px] leading-tight text-[var(--phos-color)]",
-        corruption > 4 ? "fx-leak-blur" : ""
-      )}>
+      <motion.div 
+        animate={{ y: [0, -100] }}
+        transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+        className="flex flex-col font-mono text-[8px] sm:text-[9px] leading-tight text-[var(--phos-color)]"
+      >
         {leakedLines.map((line, i) => (
           <div 
             key={i} 
@@ -54,7 +55,7 @@ export function BackgroundCode({ mood, corruption = 0 }: { mood?: string | null,
             {line}
           </div>
         ))}
-      </div>
+      </motion.div>
       <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black to-transparent" />
     </div>
   );

@@ -22,7 +22,8 @@ export function MatchingScreen({ onCancel }: { onCancel?: () => void }) {
       </div>
       <div className="flex flex-col gap-2">
         <span className="fx-holo font-bold !text-white text-lg uppercase tracking-wider">Searching matching pool</span>
-        <span className="phosphor-dim text-sm">Aligning intent frequencies...</span>
+        <span className="font-sans text-lg phosphor-glow">در حال جستجوی شبکه...</span>
+        <span className="phosphor-dim text-sm uppercase tracking-tighter">Aligning intent frequencies / هم‌ترازی فرکانس‌ها</span>
       </div>
     </motion.div>
   );

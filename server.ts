@@ -4,18 +4,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
-import admin from 'firebase-admin';
-import { getFirestore } from 'firebase-admin/firestore';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { readFileSync } from "fs";
-const firebaseConfig = JSON.parse(readFileSync(path.join(__dirname, "src", "firebase-applet-config.json"), "utf-8"));
-
-// Initialize Firebase Admin
-const adminApp = admin.initializeApp({
-  projectId: firebaseConfig.projectId,
-});
-
-const db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
 
 async function startServer() {
   const app = express();
@@ -26,16 +15,55 @@ async function startServer() {
     cors: { origin: '*' }
   });
 
-  // Local Matchmaking State (Ephemeral)
+  // --- IN-MEMORY RAM STORAGE (NON-PERSISTENT) ---
+  // When the server restarts, everything is purged.
+  let oracleStore = new Map<string, any>(); // Key: threadId
+  let oracleAnswers = new Map<string, any[]>(); // Key: threadId, Val: answers[]
+
+  // Local Matchmaking State
   let queue: any[] = [];
-  const activeChats = new Map<string, any>();
-  const users = new Map<string, any>();
+  let activeChats = new Map<string, any>();
+  let socketToUser = new Map<string, any>(); // Map socket.id to user data in memory
+  let nodeToUser = new Map<string, any>();   // Map nodeId to user data (persists until purge)
   
-  // Atmosphere Mock (Can stay in memory for high-frequency updates, or move to FS)
+  // GLOBAL PURGE TIMER (Every 4 Hours)
+  const PURGE_INTERVAL_MS = 4 * 60 * 60 * 1000;
+  let nextPurgeTime = Date.now() + PURGE_INTERVAL_MS;
+  let globalPurgePot = 0;
+
+  const performGlobalPurge = () => {
+    console.log('[RAM_PURGE] !! AUTO_PURGE_SEQUENCE_INITIALIZED !!');
+    oracleStore = new Map();
+    oracleAnswers = new Map();
+    queue = [];
+    activeChats = new Map();
+    socketToUser = new Map();
+    nodeToUser = new Map();
+    nextPurgeTime = Date.now() + PURGE_INTERVAL_MS;
+    globalPurgePot = 0;
+    io.emit('global_purge_executed');
+    io.emit('oracle_updated');
+  };
+
+  setInterval(() => {
+    const timeRemaining = Math.max(0, nextPurgeTime - Date.now());
+    io.emit('purge_sync', { timeRemaining, potTotal: globalPurgePot });
+    if (timeRemaining <= 0) {
+      performGlobalPurge();
+    }
+
+    // Random Global Glitch Event (0.5% chance per second)
+    if (Math.random() < 0.005) {
+       const glitches = ['SIGNAL_SPIKE', 'MEM_LEAK_DETECTED', 'NODE_COLLISION', 'CORRUPT_FRAME'];
+       const event = glitches[Math.floor(Math.random() * glitches.length)];
+       io.emit('global_glitch', { type: event, duration: 2000 + Math.random() * 3000 });
+       console.log(`[EVENT] Global glitch triggered: ${event}`);
+    }
+  }, 1000);
+  
   const globalMoods = {
     lonely: 10, curious: 15, bored: 5, anxious: 20, thoughtful: 30, energetic: 2, happy: 8
   };
-
 
   const DEEP_PROMPTS = [
     "What is something you've never told anyone?",
@@ -55,8 +83,8 @@ async function startServer() {
   ];
 
   // Helper matching logic
-  const findMatch = (userId: string, prefs: any) => {
-    const matchIndex = queue.findIndex(u => u.id !== userId);
+  const findMatch = (userId: string) => {
+    const matchIndex = queue.findIndex(u => u.socketId !== userId);
     if (matchIndex > -1) {
       const partner = queue[matchIndex];
       queue.splice(matchIndex, 1);
@@ -65,370 +93,271 @@ async function startServer() {
     return null;
   };
 
-  const syncUserState = (userId: string) => {
-    const user = users.get(userId);
+  const syncUserState = (socketId: string) => {
+    const user = socketToUser.get(socketId);
     if (user) {
-        io.to(userId).emit('user_state_sync', {
+        io.to(socketId).emit('user_state_sync', {
             points: user.points,
-            clearance: user.clearance,
             reputation: user.reputation
         });
-        io.to(userId).emit('points_updated', { points: user.points });
+        io.to(socketId).emit('points_updated', { points: user.points });
     }
   };
 
-  io.on('connection', (socket) => {
-    console.log('[DEBUG] User connected', socket.id);
-    const uID = socket.id;
+  const terminateChat = (roomId: string) => {
+    const room = activeChats.get(roomId);
+    if (!room) return;
 
-    // Proactively send atmosphere data on connection
-    io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
-    socket.emit('atmosphere_data', { moods: globalMoods, online: io.engine.clientsCount });
+    const durationSec = Math.floor((Date.now() - room.createdAt) / 1000);
+    let rank = "Top 50%";
+    if (durationSec > 600) rank = "Top 1%";
+    else if (durationSec > 300) rank = "Top 5%";
+    else if (durationSec > 120) rank = "Top 15%";
+    else if (durationSec > 60) rank = "Top 30%";
 
-    const terminateChat = (roomId: string, leaverId: string) => {
-      const room = activeChats.get(roomId);
-      if (!room) return;
-
-      const durationSec = Math.floor((Date.now() - room.createdAt) / 1000);
-      
-      // Simulated ranking logic
-      let rank = "Top 50%";
-      if (durationSec > 600) rank = "Top 1%"; // 10 mins
-      else if (durationSec > 300) rank = "Top 5%"; // 5 mins
-      else if (durationSec > 120) rank = "Top 15%"; // 2 mins
-      else if (durationSec > 60) rank = "Top 30%"; // 1 min
-
-      const stats = {
-        duration: durationSec,
-        rank: rank,
-        messageCount: room.messageCount || 0
-      };
-
-      room.users.forEach((id: string) => {
-        io.to(id).emit('chat_terminated', stats);
-        const u = users.get(id);
-        if (u) u.currentRoom = null;
-      });
-
-      activeChats.delete(roomId);
+    const stats = {
+      duration: durationSec,
+      rank: rank,
+      messageCount: room.messageCount || 0
     };
 
+    room.users.forEach((id: string) => {
+      io.to(id).emit('chat_terminated', stats);
+      const u = socketToUser.get(id);
+      if (u) u.currentRoom = null;
+    });
+
+    activeChats.delete(roomId);
+  };
+
+  const registerUser = (socketId: string, data: any) => {
+    const nodeId = data.nodeId || `NODE_${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
+    
+    let user = nodeToUser.get(nodeId);
+    if (!user) {
+        user = {
+            nodeId,
+            points: 1000,
+            reputation: { positive: 0, negative: 0 },
+            profile: data.profile || {},
+            mood: data.mood || null,
+            intent: data.intent || null,
+            currentRoom: null,
+            lastPartnerId: null,
+            lastAdClaimedAt: 0
+        };
+        nodeToUser.set(nodeId, user);
+    } else {
+        // Update profile if provided
+        if (data.profile) user.profile = { ...user.profile, ...data.profile };
+    }
+
+    // Link current socket
+    user.socketId = socketId;
+    socketToUser.set(socketId, user);
+    return user;
+  };
+
+  io.on('connection', (socket) => {
+    console.log('[RAM_STORAGE] Terminal connect:', socket.id);
+    const sId = socket.id;
+
+    io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
+
+    socket.on('register_node', (data) => {
+      registerUser(sId, data);
+      syncUserState(sId);
+    });
+
     socket.on('disconnect', () => {
-      console.log('[DEBUG] User disconnected', uID);
-      queue = queue.filter(u => u.id !== uID);
-      const user = users.get(uID);
-      
-      if (user?.currentRoom) {
-        terminateChat(user.currentRoom, uID);
-      }
-      users.delete(uID);
+      queue = queue.filter(u => u.socketId !== sId);
+      const user = socketToUser.get(sId);
+      if (user?.currentRoom) terminateChat(user.currentRoom);
+      socketToUser.delete(sId);
       io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
     });
 
     socket.on('leave_pool', () => {
-      console.log('[DEBUG] User left pool', uID);
-      queue = queue.filter(u => u.id !== uID);
-      const user = users.get(uID);
-      
-      if (user?.currentRoom) {
-        terminateChat(user.currentRoom, uID);
-      }
+      queue = queue.filter(u => u.socketId !== sId);
+      const user = socketToUser.get(sId);
+      if (user?.currentRoom) terminateChat(user.currentRoom);
     });
 
     socket.on('spend_points', (data) => {
-       const user = users.get(uID);
+       const user = socketToUser.get(sId);
        if (user && user.points >= data.amount) {
            user.points -= data.amount;
-           syncUserState(uID);
-       }
-    });
-
-    socket.on('buy_clearance', () => {
-       const user = users.get(uID);
-       if (user && user.points >= 500 && user.clearance === 1) {
-           user.points -= 500;
-           user.clearance = 2;
-           syncUserState(uID);
-           console.log(`[BROKER] User ${uID} upgraded to clearance 2`);
+           syncUserState(sId);
        }
     });
 
     socket.on('rate_partner', (data) => {
-       const user = users.get(uID);
+       const user = socketToUser.get(sId);
        if (!user || !user.lastPartnerId) return;
-       const partner = users.get(user.lastPartnerId);
+       const partner = socketToUser.get(user.lastPartnerId);
        
        if (partner) {
           const positiveTags = ['thoughtful', 'respectful', 'funny', 'comforting', 'intelligent'];
           let newPos = 0; let newNeg = 0;
-
           (data.tags as string[]).forEach(tag => {
               if (positiveTags.includes(tag)) newPos++;
               else newNeg++;
           });
-
           partner.reputation.positive += newPos;
           partner.reputation.negative += newNeg;
-          
           if (newPos > 0) partner.points += Math.floor(Math.random() * 20) + 10;
-          
-          syncUserState(partner.id);
-          console.log(`[REPUTATION] User ${user.lastPartnerId} got rep update: +${newPos} -${newNeg}`);
+          syncUserState(partner.socketId);
        }
     });
 
     socket.on('request_atmosphere', () => {
-       socket.emit('atmosphere_data', { moods: globalMoods, online: users.size }); 
+       socket.emit('atmosphere_data', { moods: globalMoods, online: io.engine.clientsCount }); 
     });
 
-    socket.on('request_oracle', async () => {
-       try {
-         const snapshot = await db.collection('oracle_threads')
-           .orderBy('isResolved', 'asc')
-           .orderBy('bounty', 'desc') 
-           .orderBy('timestamp', 'desc')
-           .limit(40).get();
-         const threads = snapshot.docs.map(doc => ({
-           id: doc.id,
-           ...doc.data()
-         }));
-         socket.emit('oracle_data', threads);
-       } catch (error) {
-         console.error('[ORACLE] Error fetching threads:', error);
+    socket.on('request_oracle', () => {
+       const threads = Array.from(oracleStore.values())
+         .sort((a,b) => {
+            if (a.isResolved !== b.isResolved) return a.isResolved ? 1 : -1;
+            return b.timestamp - a.timestamp;
+         })
+         .slice(0, 40);
+       socket.emit('oracle_data', threads);
+    });
+
+    socket.on('request_thread_details', (data) => {
+       const answers = oracleAnswers.get(data.threadId) || [];
+       socket.emit('thread_details', { threadId: data.threadId, answers });
+    });
+
+    socket.on('post_oracle_thread', (data) => {
+       const user = socketToUser.get(sId);
+       if (!user) return;
+       const bountyAmount = data.bounty || 0;
+       
+       if (bountyAmount > 0) {
+          if (user.points < bountyAmount) {
+             socket.emit('system_message', { text: "!! INSUFFICIENT FUNDS FOR BOUNTY_STAKING !!" });
+             return;
+          }
+          user.points -= bountyAmount;
+          syncUserState(sId);
        }
+
+       const threadId = 't_' + Date.now() + Math.random().toString(36).substring(7);
+       const newThread = {
+          id: threadId,
+          authorId: user.nodeId,
+          question: data.question,
+          timestamp: Date.now(),
+          bounty: bountyAmount,
+          isResolved: false,
+          answerCount: 0
+       };
+       oracleStore.set(threadId, newThread);
+       oracleAnswers.set(threadId, []);
+       io.emit('oracle_updated');
     });
 
-    socket.on('request_thread_details', async (data) => {
-       try {
-         const threadRef = db.collection('oracle_threads').doc(data.threadId);
-         const answersSnap = await threadRef.collection('answers')
-           .orderBy('vouchCount', 'desc')
-           .orderBy('timestamp', 'asc')
-           .get();
-         
-         const answers = answersSnap.docs.map(doc => ({
-           id: doc.id,
-           ...doc.data()
-         }));
-         
-         socket.emit('thread_details', { threadId: data.threadId, answers });
-       } catch (error) {
-         console.error('[ORACLE] Error fetching thread details:', error);
-       }
+    socket.on('post_oracle_answer', (data) => {
+       const user = socketToUser.get(sId);
+       if (!user) return;
+       const thread = oracleStore.get(data.threadId);
+       if (!thread) return;
+
+       const answers = oracleAnswers.get(data.threadId) || [];
+       answers.push({
+          id: 'a_' + Date.now(),
+          authorId: user.nodeId,
+          text: data.text,
+          timestamp: Date.now(),
+          vouchCount: 0
+       });
+       thread.answerCount = answers.length;
+       io.emit('oracle_updated');
     });
 
-    socket.on('post_oracle_thread', async (data) => {
-       try {
-         const actualUID = data.nodeId || uID;
-         const bountyAmount = data.bounty || 0;
-         
-         if (bountyAmount > 0) {
-            const userRef = db.collection('users').doc(actualUID);
-            const userSnap = await userRef.get();
-            if (!userSnap.exists || (userSnap.data()?.points || 0) < bountyAmount) {
-               socket.emit('system_message', { text: "!! INSUFFICIENT FUNDS FOR BOUNTY_STAKING !!" });
-               return;
+    socket.on('vouch_answer', (data) => {
+       const answers = oracleAnswers.get(data.threadId) || [];
+       const answer = answers.find(a => a.id === data.answerId);
+       if (answer) {
+          answer.vouchCount++;
+          for (const u of socketToUser.values()) {
+            if (u.nodeId === answer.authorId) {
+              u.reputation.positive++;
+              syncUserState(u.socketId);
             }
-            await userRef.update({ points: admin.firestore.FieldValue.increment(-bountyAmount) });
-         }
-
-         const newThread = {
-            authorId: actualUID,
-            question: data.question,
-            timestamp: Date.now(),
-            bounty: bountyAmount,
-            isResolved: false,
-            answerCount: 0
-         };
-         await db.collection('oracle_threads').add(newThread);
-         io.emit('oracle_updated');
-       } catch (error) {
-         console.error('[ORACLE] Error posting thread:', error);
+          }
+          io.emit('oracle_updated');
        }
     });
 
-    socket.on('post_oracle_answer', async (data) => {
-       try {
-         const actualUID = data.nodeId || uID;
-         const threadRef = db.collection('oracle_threads').doc(data.threadId);
-         
-         const newAnswer = {
-            authorId: actualUID,
-            text: data.text,
-            timestamp: Date.now(),
-            vouchCount: 0
-         };
+    socket.on('resolve_thread', (data) => {
+       const thread = oracleStore.get(data.threadId);
+       const user = socketToUser.get(sId);
+       if (!thread || !user || thread.authorId !== user.nodeId) return;
 
-         await db.runTransaction(async (t) => {
-           const threadSnap = await t.get(threadRef);
-           if (!threadSnap.exists) return;
-           
-           const answerRef = threadRef.collection('answers').doc();
-           t.set(answerRef, newAnswer);
-           t.update(threadRef, { answerCount: admin.firestore.FieldValue.increment(1) });
-         });
-         
-         io.emit('oracle_updated');
-       } catch (error) {
-         console.error('[ORACLE] Error posting answer:', error);
+       if (thread.bounty > 0) {
+          const answers = oracleAnswers.get(data.threadId) || [];
+          const topAnswer = [...answers].sort((a,b) => b.vouchCount - a.vouchCount)[0];
+          if (topAnswer) {
+             for (const u of socketToUser.values()) {
+               if (u.nodeId === topAnswer.authorId) {
+                  u.points += thread.bounty;
+                  syncUserState(u.socketId);
+               }
+             }
+          }
        }
+       thread.isResolved = true;
+       io.emit('oracle_updated');
     });
 
-    socket.on('vouch_answer', async (data) => {
-       try {
-         const threadRef = db.collection('oracle_threads').doc(data.threadId);
-         const answerRef = threadRef.collection('answers').doc(data.answerId);
-         
-         await db.runTransaction(async (t) => {
-           const answerSnap = await t.get(answerRef);
-           if (!answerSnap.exists) return;
-           
-           const answer = answerSnap.data();
-           t.update(answerRef, { vouchCount: admin.firestore.FieldValue.increment(1) });
-           
-           if (answer?.authorId) {
-             const authorRef = db.collection('users').doc(answer.authorId);
-             t.update(authorRef, { 'reputation.positive': admin.firestore.FieldValue.increment(1) });
-           }
-         });
-         io.emit('oracle_updated');
-       } catch (error) {
-         console.error('[ORACLE] Error vouching:', error);
-       }
-    });
+    socket.on('join_pool', (data) => {
+      const userData = registerUser(sId, data);
+      userData.mood = data.mood;
+      userData.intent = data.intent;
 
-    socket.on('resolve_thread', async (data) => {
-       try {
-         const threadRef = db.collection('oracle_threads').doc(data.threadId);
-         const threadSnap = await threadRef.get();
-         if (!threadSnap.exists || threadSnap.data()?.authorId !== data.nodeId) return;
+      syncUserState(sId);
 
-         const threadData = threadSnap.data();
-         const bounty = threadData?.bounty || 0;
-         
-         if (bounty > 0) {
-            // Find top answer
-            const topAnswerSnap = await threadRef.collection('answers')
-               .orderBy('vouchCount', 'desc')
-               .limit(1)
-               .get();
-            
-            if (!topAnswerSnap.empty) {
-               const winner = topAnswerSnap.docs[0].data();
-               const winnerRef = db.collection('users').doc(winner.authorId);
-               await winnerRef.update({ points: admin.firestore.FieldValue.increment(bounty) });
-            }
-         }
-
-         await threadRef.update({ isResolved: true });
-         io.emit('oracle_updated');
-       } catch (error) {
-         console.error('[ORACLE] Error resolving:', error);
-       }
-    });
-
-    socket.on('join_pool', async (data) => {
-      const actualUID = data.nodeId || uID;
-      
-      // Sync or Create user in Firestore
-      const userRef = db.collection('users').doc(actualUID);
-      const userSnap = await userRef.get();
-      if (!userSnap.exists) {
-        await userRef.set({
-          id: actualUID,
-          points: 1000,
-          clearance: 1,
-          reputation: { positive: 0, negative: 0 },
-          profile: data.profile || {}
-        });
-      }
-
-      // Update global moods tally
       if (data.mood && globalMoods[data.mood as keyof typeof globalMoods] !== undefined) {
          globalMoods[data.mood as keyof typeof globalMoods]++;
          io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
       }
-
-      const userData = userSnap.exists ? userSnap.data() : { id: actualUID, points: 1000, clearance: 1, reputation: { positive: 0, negative: 0 } };
-
-      users.set(uID, { 
-         ...userData,
-         mood: data.mood, 
-         intent: data.intent, 
-         profile: data.profile, 
-         currentRoom: null,
-         nodeId: actualUID
-      });
-      syncUserState(uID);
       
-      const partner = findMatch(uID, data);
+      const partner = findMatch(sId);
       if (partner) {
-        const roomId = `room_${uID}_${partner.id}`;
-        
+        const roomId = `room_${sId}_${partner.socketId}`;
         socket.join(roomId);
-        io.sockets.sockets.get(partner.id)?.join(roomId);
+        io.sockets.sockets.get(partner.socketId)?.join(roomId);
         
         activeChats.set(roomId, { 
-           users: [uID, partner.id],
+           users: [sId, partner.socketId],
            topic: data.intent === partner.intent ? data.intent : 'Life choices',
            createdAt: Date.now(),
+           expiresAt: Date.now() + 5 * 60 * 1000, // 5 minute chat timer
            lastActivityAt: Date.now(),
            pendingReveals: {},
            promptInjected: false,
-           milestones: { '1': false, '5': false }
+           milestones: { '1': false, '5': false },
+           messageCount: 0
         });
         
-        const userState = users.get(uID);
-        const partnerState = users.get(partner.id);
-        if (userState) { userState.currentRoom = roomId; userState.lastPartnerId = partner.id; }
-        if (partnerState) { partnerState.currentRoom = roomId; partnerState.lastPartnerId = uID; }
+        userData.currentRoom = roomId;
+        userData.lastPartnerId = partner.socketId;
+        const partnerState = socketToUser.get(partner.socketId);
+        if (partnerState) {
+          partnerState.currentRoom = roomId;
+          partnerState.lastPartnerId = sId;
+        }
 
-        io.to(roomId).emit('match_found', { 
-          roomId, 
-          topic: activeChats.get(roomId).topic 
-        });
-        
-        console.log(`[DEBUG] Match formed: ${roomId}`);
+        io.to(roomId).emit('match_found', { roomId, topic: activeChats.get(roomId).topic });
       } else {
-        queue.push({ id: uID, ...data });
-        console.log(`[DEBUG] User added to queue: ${uID}`);
-      }
-    });
-
-    socket.on('boost_message', async (data) => {
-      try {
-        const costMap: Record<string, number> = { 'highlight': 50, 'glitch': 150, 'redact': 200 };
-        const cost = costMap[data.type] || 0;
-        const actualUID = data.nodeId || uID;
-
-        const userRef = db.collection('users').doc(actualUID);
-        const userSnap = await userRef.get();
-        if (!userSnap.exists || (userSnap.data()?.points || 0) < cost) {
-           socket.emit('system_message', { text: "!! INSUFFICIENT POINTS FOR SIGNAL_BOOST !!" });
-           return;
-        }
-
-        await userRef.update({ points: admin.firestore.FieldValue.increment(-cost) });
-        
-        // Broadcast the boost to the room
-        const user = users.get(uID);
-        if (user && user.currentRoom) {
-           io.to(user.currentRoom).emit('message_updated', { 
-             messageId: data.messageId, 
-             boost: data.type 
-           });
-           
-           // Sync user points back to socket state
-           user.points = (userSnap.data()?.points || cost) - cost;
-           syncUserState(uID);
-        }
-      } catch (e) {
-        console.error('[BOOST] error:', e);
+        queue.push({ socketId: sId, ...data });
       }
     });
 
     socket.on('send_message', (data) => {
-      const user = users.get(uID);
+      const user = socketToUser.get(sId);
       if (user && user.currentRoom) {
         if (data.text.startsWith('/void ')) {
            const voidMsg = data.text.replace('/void ', '');
@@ -439,7 +368,7 @@ async function startServer() {
 
         socket.to(user.currentRoom).emit('receive_message', {
           id: Date.now().toString(),
-          sender: uID,
+          sender: sId,
           text: data.text,
           timestamp: Date.now()
         });
@@ -447,142 +376,126 @@ async function startServer() {
         const room = activeChats.get(user.currentRoom);
         if (room) {
           room.lastActivityAt = Date.now();
-          room.promptInjected = false;
-          room.messageCount = (room.messageCount || 0) + 1;
+          room.messageCount++;
         }
-
-        // Reward points
         user.points += 5;
         socket.emit('points_updated', { points: user.points, reason: '+5 msg' });
       }
     });
 
-    socket.on('trigger_activity', () => {
-      const user = users.get(uID);
-      if (!user || !user.currentRoom) return;
-      const room = activeChats.get(user.currentRoom);
-      if (room) {
-        const randomActivity = ACTIVITIES[Math.floor(Math.random() * ACTIVITIES.length)];
-        io.to(user.currentRoom).emit('system_message', {
-           text: `[MINI-GAME] SYSTEM_INJECT: ${randomActivity}`
+    socket.on('send_reaction', (data) => {
+      const user = socketToUser.get(sId);
+      if (user && user.currentRoom) {
+        socket.to(user.currentRoom).emit('receive_reaction', {
+          messageId: data.messageId,
+          emoji: data.emoji,
+          sender: sId
         });
-        room.lastActivityAt = Date.now();
       }
     });
 
-    // Handle mutual reveals
-    socket.on('propose_reveal', (data) => {
-      const user = users.get(uID);
-      if (!user || !user.currentRoom) return;
-
-      const room = activeChats.get(user.currentRoom);
-      if (!room) return;
-
-      if (user.points < data.cost) {
-         socket.emit('system_message', { text: `Insufficient points to propose ${data.type} reveal.` });
-         return;
-      }
-
-      // Mark as pending
-      room.pendingReveals[data.type] = {
-         proposedBy: uID,
-         cost: data.cost
-      };
-
-      // Notify the room
-      io.to(user.currentRoom).emit('system_message', {
-         text: `>>> MUTUAL REVEAL PROPOSED: ${data.type.toUpperCase()} (${data.cost} pts). Type /accept ${data.type} to unlock. <<<`,
-         revealProposal: data.type
-      });
-    });
-
-    socket.on('accept_reveal', (data) => {
-       const user = users.get(uID);
+    socket.on('extend_chat_timer', (data) => {
+       const user = socketToUser.get(sId);
        if (!user || !user.currentRoom) return;
-
        const room = activeChats.get(user.currentRoom);
        if (!room) return;
 
-       const pending = room.pendingReveals[data.type];
-       if (!pending || pending.proposedBy === uID) return; // Cant accept own request
+       const cost = 200; // Extend cost
+       if (user.points >= cost) {
+          user.points -= cost;
+          room.expiresAt += 2 * 60 * 1000; // Add 2 minutes
+          syncUserState(sId);
+          io.to(user.currentRoom).emit('system_message', { text: `[PROTOCOL_OVERRIDE] > Memory decay delayed by user contribution (+2m)` });
+          io.to(user.currentRoom).emit('timer_extended', { expiresAt: room.expiresAt });
+       }
+    });
 
-       if (user.points < pending.cost) {
-          socket.emit('system_message', { text: `Insufficient points to accept ${data.type} reveal.` });
-          return;
+    socket.on('contribute_purge_pot', (data) => {
+       const user = socketToUser.get(sId);
+       if (!user) return;
+       const amount = parseInt(data.amount);
+       if (isNaN(amount) || amount <= 0 || user.points < amount) return;
+
+       user.points -= amount;
+       globalPurgePot += amount;
+       
+       const delayMs = (amount / 100) * 10 * 60 * 1000; // Increased to 10 mins per 100 credits for visibility
+       nextPurgeTime += delayMs;
+
+       syncUserState(sId);
+       
+       // Force immediate broadcast of new time
+       const timeRemaining = Math.max(0, nextPurgeTime - Date.now());
+       io.emit('purge_sync', { timeRemaining, potTotal: globalPurgePot });
+       
+       // Global Broadcast to everyone
+       io.emit('system_message', { 
+         text: `[SIGNAL_BOOST] Node ${user.nodeId.substring(0,6)} contributed ${amount} credits. The Purge has been delayed.` 
+       });
+       io.emit('purge_contributed', { nodeId: user.nodeId, amount, newPurgeTime: nextPurgeTime });
+    });
+
+    socket.on('claim_ad_reward', () => {
+       const user = socketToUser.get(sId);
+       if (!user) {
+         console.warn(`[REWARD_FAIL] No user found for socket ${sId}`);
+         socket.emit('system_message', { text: "!!! NODE_IDENTITY_VOUCHER_MISSING. PLEASE_RE-REGISTER_NODE. !!!" });
+         return;
+       }
+       
+       const now = Date.now();
+       const COOLDOWN = 1.5 * 60 * 1000; // Reduced to 1.5 min for better UX
+       
+       if (user.lastAdClaimedAt && now - user.lastAdClaimedAt < COOLDOWN) {
+         const remaining = Math.ceil((COOLDOWN - (now - user.lastAdClaimedAt)) / 1000);
+         socket.emit('system_message', { text: `!!! MINING_LIMIT_REACHED. COOL_DOWN_REMAINING: ${remaining}s !!!` });
+         return;
        }
 
-       const proposerID = pending.proposedBy;
-       const proposer = users.get(proposerID);
-
-       // Deduct points
-       user.points -= pending.cost;
-       proposer.points -= pending.cost;
-
-       io.to(uID).emit('points_updated', { points: user.points });
-       io.to(proposerID).emit('points_updated', { points: proposer.points });
-
-       // Broadcast the actual profile data!
-       io.to(uID).emit('system_message', { text: `[REVEALED] Partner's ${data.type}: ${proposer.profile[data.type] || 'Unknown'}`});
-       io.to(proposerID).emit('system_message', { text: `[REVEALED] Partner's ${data.type}: ${user.profile[data.type] || 'Unknown'}`});
+       user.points += 250;
+       user.lastAdClaimedAt = now;
        
-       delete room.pendingReveals[data.type];
+       console.log(`[REWARD_SUCCESS] Node ${user.nodeId} claimed 250. Total: ${user.points}`);
+       
+       syncUserState(sId);
+       socket.emit('system_message', { text: ">>> Signal mined successfully. +250 credits allocated. <<<" });
     });
   });
 
-  // API routes FIRST
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
+  app.get("/api/health", (req, res) => res.json({ status: "RAM_READY" }));
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    console.log("Setting up Vite middleware for development");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
-    console.log("Serving static dist for production");
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
   setInterval(() => {
     const now = Date.now();
     for (const [roomId, room] of activeChats.entries()) {
-      // Momentum: 30 seconds of silence for demonstration
-      if (now - room.lastActivityAt > 30000 && !room.promptInjected) {
+      // 1. Inactivity prompt
+      if (now - room.lastActivityAt > 45000 && !room.promptInjected) {
          const randomPrompt = DEEP_PROMPTS[Math.floor(Math.random() * DEEP_PROMPTS.length)];
-         io.to(roomId).emit('system_message', {
-            text: `[SILENCE_DETECTED] > Injecting momentum prompt: "${randomPrompt}"`
-         });
-         room.lastActivityAt = now; 
-         room.promptInjected = true;
+         io.to(roomId).emit('system_message', { text: `[SILENCE_DETECTED] > Injecting momentum: "${randomPrompt}"` });
+         room.lastActivityAt = now; room.promptInjected = true;
       }
 
-      // Milestone: 1 minute (60s)
-      if (now - room.createdAt > 60000 && !room.milestones['1']) {
-          io.to(roomId).emit('system_message', {
-             text: `[MILESTONE_UNLOCKED] > You've survived 1 minute together. Longer than 40% of connections.`
-          });
-          room.milestones['1'] = true;
-      }
-      // Milestone: 5 minute (300s)
-      if (now - room.createdAt > 300000 && !room.milestones['5']) {
-          io.to(roomId).emit('system_message', {
-             text: `[MILESTONE_UNLOCKED] > 5 minutes. You've talked longer than 82% of conversations. Connection deepening.`
-          });
-          room.milestones['5'] = true;
+      // 2. Timer sync
+      io.to(roomId).emit('chat_timer_sync', { expiresAt: room.expiresAt });
+
+      // 3. Expiration check
+      if (now >= room.expiresAt) {
+         io.to(roomId).emit('system_message', { text: "!! MEMORY_DECAY_COMPLETE. TERMINATING CONNECTION. !!" });
+         terminateChat(roomId);
       }
     }
   }, 5000);
 
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Ephemeral Server running on http://localhost:${PORT}`);
   });
 }
 

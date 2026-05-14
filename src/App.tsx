@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { socketService } from './socket';
 import { audioService } from './audio';
@@ -8,17 +8,17 @@ import {
   BootSequence, 
   ProfileSetupScreen, 
   DashboardScreen, 
-  DataBrokerScreen, 
   OracleScreen, 
   SelectionScreen, 
   MatchingScreen, 
   ChatBootSequence, 
   ChatScreen, 
   ConversationStatsScreen, 
-  RatingScreen 
+  RatingScreen,
+  AdTerminal
 } from './components';
 
-type AppState = 'START' | 'BOOT' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'ORACLE' | 'RATING' | 'DATA_BROKER' | 'CHAT_STATS';
+type AppState = 'START' | 'BOOT' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'ORACLE' | 'RATING' | 'CHAT_STATS' | 'AD_TERMINAL';
 type Theme = 'green' | 'amber';
 
 export default function App() {
@@ -27,7 +27,6 @@ export default function App() {
   const [mood, setMood] = useState<string | null>(null);
   const [intent, setIntent] = useState<string | null>(null);
   const [points, setPoints] = useState<number>(0);
-  const [clearance, setClearance] = useState<number>(1);
   const [reputation, setReputation] = useState<{ positive: number, negative: number }>({ positive: 0, negative: 0 });
   const [roomId, setRoomId] = useState<string | null>(null);
   const [topic, setTopic] = useState<string | null>(null);
@@ -37,6 +36,9 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>('green');
   const [nodeId, setNodeId] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [purgeSecondsRemaining, setPurgeSecondsRemaining] = useState<number | null>(null);
+  const [purgePotTotal, setPurgePotTotal] = useState<number>(0);
+  const [isGlitching, setIsGlitching] = useState(false);
 
   useEffect(() => {
     let savedId = localStorage.getItem('terminal_node_id');
@@ -80,15 +82,49 @@ export default function App() {
 
     socketService.on('user_state_sync', (data: any) => {
       if (data.points !== undefined) setPoints(data.points);
-      if (data.clearance !== undefined) setClearance(data.clearance);
       if (data.reputation !== undefined) setReputation(data.reputation);
     });
 
+    socketService.on('purge_sync', (data: any) => {
+      setPurgeSecondsRemaining(Math.floor(data.timeRemaining / 1000));
+      if (data.potTotal !== undefined) setPurgePotTotal(data.potTotal);
+    });
+
+    socketService.on('global_purge_executed', () => {
+      // Clear local non-persistent UI states if needed
+      setVoidMessages([]);
+      setPoints(1000); // Reset to base points if server wiped
+      setReputation({ positive: 0, negative: 0 });
+      setAppState(current => (current === 'CHAT' || current === 'MATCHING' ? 'DASHBOARD' : current));
+    });
+    
+    socketService.on('global_glitch', (data: any) => {
+      setIsGlitching(true);
+      if (!isMuted) {
+        audioService.playGlitch();
+        setTimeout(() => audioService.playGlitch(), data.duration / 2);
+      }
+      setTimeout(() => setIsGlitching(false), data.duration);
+    });
+
     return () => {
-      socketService.off('match_found', () => {});
-      socketService.off('points_updated', () => {});
+      socketService.off('match_found');
+      socketService.off('chat_terminated');
+      socketService.off('void_broadcast');
+      socketService.off('atmosphere_updated');
+      socketService.off('points_updated');
+      socketService.off('user_state_sync');
+      socketService.off('purge_sync');
+      socketService.off('global_purge_executed');
+      socketService.off('global_glitch');
     };
-  }, [isMuted]);
+  }, []); // Only register once
+
+  useEffect(() => {
+    if (appState === 'DASHBOARD' && nodeId) {
+      socketService.emit('register_node', { nodeId, profile });
+    }
+  }, [appState, nodeId, profile]);
 
   const handleJoinPool = (selectedIntent: string) => {
     if (!isMuted) audioService.playKeystroke();
@@ -96,6 +132,10 @@ export default function App() {
     setAppState('MATCHING');
     socketService.emit('join_pool', { mood, intent: selectedIntent, profile, nodeId });
   };
+
+  const onBootComplete = useCallback(() => {
+    setAppState('PROFILE');
+  }, []);
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'green' ? 'amber' : 'green');
@@ -110,12 +150,22 @@ export default function App() {
     }
   };
 
+  const formatPurgeTime = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const isPurgeClose = purgeSecondsRemaining !== null && purgeSecondsRemaining < 60;
+
   return (
-    <div className="crt-screen h-screen w-screen overflow-hidden bg-black selection:bg-[var(--phos-color)] selection:text-black">
+    <div className={`crt-screen h-screen w-screen overflow-hidden bg-black selection:bg-[var(--phos-color)] selection:text-black ${isPurgeClose || isGlitching ? 'fx-jitter' : ''} ${isGlitching ? 'fx-aberration' : ''}`}>
+      <div className="crt-scanline-bar" />
       <div className="crt-overlay" />
       <div className="crt-bottom-fade" />
       <div className="crt-curve h-full w-full relative flex flex-col">
-        <BackgroundCode mood={mood} corruption={clearance > 1 ? 5 : 0} />
+        <BackgroundCode mood={mood} />
         
         <div className="flex-1 p-4 sm:p-8 flex flex-col pointer-events-auto z-10 overflow-hidden">
           <header className="flex justify-between items-center border-b border-[var(--phos-color)]/30 pb-2 mb-4 sm:mb-6">
@@ -125,6 +175,15 @@ export default function App() {
                 <span className="phosphor-glow font-bold tracking-widest uppercase cursor-pointer text-sm sm:text-base" onClick={() => { if(appState !== 'START' && appState !== 'BOOT') setAppState('DASHBOARD'); }}>
                   TERMINAL.FA
                 </span>
+                {purgeSecondsRemaining !== null && appState !== 'BOOT' && appState !== 'START' && (
+                  <div className="ml-2 sm:ml-4 flex items-center gap-1.5 border-l border-[var(--phos-color)]/20 pl-2 sm:pl-4">
+                    <span className="text-[7px] sm:text-[9px] uppercase tracking-tighter opacity-50 font-mono hidden xs:inline pr-1">DATA_PURGE_IN:</span>
+                    <span className="text-[9px] font-sans opacity-50 hidden md:inline">پاکسازی داده‌ها در:</span>
+                    <span className="text-[10px] sm:text-sm font-mono text-red-500 phosphor-glow tracking-widest">
+                      {formatPurgeTime(purgeSecondsRemaining)}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-3 text-[7px] sm:text-[9px] font-mono opacity-60">
                 <span className="flex items-center gap-1"><Cpu size={10} /> {nodeId}</span>
@@ -172,37 +231,114 @@ export default function App() {
                  </motion.div>
               )}
 
-              {appState === 'BOOT' && <BootSequence key="boot" onComplete={() => setAppState('PROFILE')} />}
+              {appState === 'BOOT' && (
+                <motion.div key="boot" exit={{ opacity: 0 }} className="h-full">
+                  <BootSequence onComplete={onBootComplete} />
+                </motion.div>
+              )}
               
-              {appState === 'PROFILE' && <ProfileSetupScreen key="profile" onComplete={(p) => { setProfile(p); setAppState('DASHBOARD'); }} />}
-
-              {appState === 'DASHBOARD' && (
-                <DashboardScreen key="dashboard" onFindConnection={() => setAppState('MOOD')} onOpenOracle={() => setAppState('ORACLE')} onOpenBroker={() => setAppState('DATA_BROKER')} reputation={reputation} clearance={clearance} voidMessages={voidMessages} atmosphere={atmosphere} />
+              {appState === 'PROFILE' && (
+                <motion.div key="profile" exit={{ opacity: 0 }} className="h-full">
+                  <ProfileSetupScreen onComplete={(p) => { setProfile(p); setAppState('DASHBOARD'); }} />
+                </motion.div>
               )}
 
-              {appState === 'DATA_BROKER' && <DataBrokerScreen key="broker" onBack={() => setAppState('DASHBOARD')} points={points} clearance={clearance} />}
+              {appState === 'DASHBOARD' && (
+                <motion.div key="dashboard" exit={{ opacity: 0 }} className="h-full">
+                  <DashboardScreen 
+                    onFindConnection={() => setAppState('MOOD')} 
+                    onOpenOracle={() => setAppState('ORACLE')} 
+                    onOpenAdTerminal={() => setAppState('AD_TERMINAL')}
+                    reputation={reputation} 
+                    voidMessages={voidMessages} 
+                    atmosphere={atmosphere} 
+                    purgePotTotal={purgePotTotal}
+                  />
+                </motion.div>
+              )}
 
-              {appState === 'ORACLE' && <OracleScreen key="oracle" onBack={() => setAppState('DASHBOARD')} clearance={clearance} nodeId={nodeId} points={points} />}
+              {appState === 'ORACLE' && (
+                <motion.div key="oracle" exit={{ opacity: 0 }} className="h-full">
+                  <OracleScreen onBack={() => setAppState('DASHBOARD')} nodeId={nodeId || ""} points={points} />
+                </motion.div>
+              )}
 
               {appState === 'MOOD' && (
-                <SelectionScreen key="mood" title="SYS > HOW_ARE_YOU_FEELING?" subtitle="Select current emotional parameter." options={['lonely', 'happy', 'curious', 'bored', 'anxious', 'thoughtful', 'energetic']} onSelect={(m) => { audioService.playKeystroke(); setMood(m); setAppState('INTENT'); }} />
+                <motion.div key="mood" exit={{ opacity: 0 }} className="h-full">
+                  <SelectionScreen 
+                    title="SYS > HOW_ARE_YOU_FEELING?" 
+                    farsiTitle="در حال حاضر چه احساسی دارید؟"
+                    subtitle="Select current emotional parameter." 
+                    farsiSubtitle="یک پارامتر احساسی را انتخاب کنید."
+                    options={[
+                      { id: 'lonely', en: 'lonely', fa: 'تنها' },
+                      { id: 'happy', en: 'happy', fa: 'خوشحال' },
+                      { id: 'curious', en: 'curious', fa: 'کنجکاو' },
+                      { id: 'bored', en: 'bored', fa: 'بی‌حوصله' },
+                      { id: 'anxious', en: 'anxious', fa: 'مضطرب' },
+                      { id: 'thoughtful', en: 'thoughtful', fa: 'متفکر' },
+                      { id: 'energetic', en: 'energetic', fa: 'پرانرژی' }
+                    ]} 
+                    onSelect={(m) => { audioService.playKeystroke(); setMood(m); setAppState('INTENT'); }} 
+                  />
+                </motion.div>
               )}
 
               {appState === 'INTENT' && (
-                <SelectionScreen key="intent" title="SYS > WHAT_ARE_YOU_SEEKING?" subtitle="Calibrate matching engine intent." options={['deep conversation', 'random fun', 'advice', 'listening', 'debate', 'storytelling']} onSelect={handleJoinPool} />
+                <motion.div key="intent" exit={{ opacity: 0 }} className="h-full">
+                  <SelectionScreen 
+                    title="SYS > WHAT_ARE_YOU_SEEKING?" 
+                    farsiTitle="به دنبال چه هستید؟"
+                    subtitle="Calibrate matching engine intent." 
+                    farsiSubtitle="زمان‌بندی و قصد خود را کالیبره کنید."
+                    options={[
+                      { id: 'deep conversation', en: 'deep conversation', fa: 'گفتگوی عمیق' },
+                      { id: 'random fun', en: 'random fun', fa: 'سرگرمی' },
+                      { id: 'advice', en: 'advice', fa: 'مشورت' },
+                      { id: 'listening', en: 'listening', fa: 'شنونده' },
+                      { id: 'debate', en: 'debate', fa: 'بحث' },
+                      { id: 'storytelling', en: 'storytelling', fa: 'داستان‌گویی' }
+                    ]} 
+                    onSelect={handleJoinPool} 
+                  />
+                </motion.div>
               )}
 
-              {appState === 'MATCHING' && <MatchingScreen key="matching" onCancel={() => { socketService.emit('leave_pool', {}); setAppState('DASHBOARD'); }} />}
+              {appState === 'MATCHING' && (
+                <motion.div key="matching" exit={{ opacity: 0 }} className="h-full">
+                  <MatchingScreen onCancel={() => { socketService.emit('leave_pool', {}); setAppState('DASHBOARD'); }} />
+                </motion.div>
+              )}
               
-              {appState === 'CHAT_BOOT' && <ChatBootSequence key="chatboot" onComplete={() => setAppState('CHAT')} />}
+              {appState === 'CHAT_BOOT' && (
+                <motion.div key="chatboot" exit={{ opacity: 0 }} className="h-full">
+                  <ChatBootSequence onComplete={() => setAppState('CHAT')} />
+                </motion.div>
+              )}
 
               {appState === 'CHAT' && (
-                <ChatScreen key="chat" topic={topic || ""} roomId={roomId!} points={points} nodeId={nodeId} onPointsSpent={(cost, type) => { audioService.playKeystroke(); socketService.emit('propose_reveal', { cost, type: type.toLowerCase() }); }} />
+                <motion.div key="chat" exit={{ opacity: 0 }} className="h-full">
+                  <ChatScreen topic={topic || ""} roomId={roomId!} points={points} nodeId={nodeId || ""} onPointsSpent={(cost, type) => { audioService.playKeystroke(); socketService.emit('propose_reveal', { cost, type: type.toLowerCase() }); }} />
+                </motion.div>
               )}
 
-              {appState === 'CHAT_STATS' && <ConversationStatsScreen key="stats" stats={chatStats} onNext={() => setAppState('RATING')} />}
+              {appState === 'CHAT_STATS' && (
+                <motion.div key="stats" exit={{ opacity: 0 }} className="h-full">
+                  <ConversationStatsScreen stats={chatStats} onNext={() => setAppState('RATING')} />
+                </motion.div>
+              )}
 
-              {appState === 'RATING' && <RatingScreen key="rating" onComplete={() => setAppState('DASHBOARD')} />}
+              {appState === 'RATING' && (
+                <motion.div key="rating" exit={{ opacity: 0 }} className="h-full">
+                  <RatingScreen onComplete={() => setAppState('DASHBOARD')} />
+                </motion.div>
+              )}
+
+              {appState === 'AD_TERMINAL' && (
+                <motion.div key="ad" exit={{ opacity: 0 }} className="h-full">
+                  <AdTerminal onComplete={() => setAppState('DASHBOARD')} />
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
         </div>

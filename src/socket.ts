@@ -25,7 +25,11 @@ class SocketService {
     this.listeners.set(event, callbacks);
   }
 
-  off(event: string, callback: Function) {
+  off(event: string, callback?: Function) {
+    if (!callback) {
+      this.listeners.delete(event);
+      return;
+    }
     const callbacks = this.listeners.get(event) || [];
     this.listeners.set(event, callbacks.filter(cb => cb !== callback));
   }
