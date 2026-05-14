@@ -31,16 +31,17 @@ export function ChatBootSequence({ onComplete }: { onComplete: () => void }) {
     }, 100);
 
     const timer = setTimeout(() => {
+      console.log('[DEBUG] ChatBootSequence complete, transitioning to CHAT');
       clearInterval(interval);
       onComplete();
-    }, 2500);
+    }, 2800);
 
     return () => {
       isMounted = false;
       clearInterval(interval);
       clearTimeout(timer);
     };
-  }, [onComplete]);
+  }, []); // Run once on mount
 
   return (
     <motion.div 

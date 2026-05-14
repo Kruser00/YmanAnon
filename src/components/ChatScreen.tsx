@@ -16,7 +16,9 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const [showEmojiPicker, setShowEmojiPicker] = useState<string | null>(null);
   const [timerExpiresAt, setTimerExpiresAt] = useState<number | null>(null);
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
+  const [partnerTyping, setPartnerTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const emojis = ['🔥', '👍', '❤️', '😂', '😮', '💀'];
 
@@ -74,6 +76,14 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       setMessages(prev => [...prev, { id: 'sys-dis', text: 'PARTNER HAS DISCONNECTED. / هم‌صحبت شما از محیط گفتگو خارج شد.', isSelf: false, system: true }]);
     };
 
+    const handlePartnerTyping = (data: { isTyping: boolean }) => {
+      setPartnerTyping(data.isTyping);
+      if (data.isTyping) {
+        // play subtle background typing sound? We can just use playKeystroke at lower volume or something. 
+        // We'll leave it visual for now to avoid annoyance, maybe just a very muted glitch.
+      }
+    };
+
     const handleMessageUpdate = (data: any) => {
        setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, boost: data.boost } : m));
     };
@@ -92,6 +102,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     socketService.on('receive_message', handleReceive);
     socketService.on('system_message', handleSystem);
     socketService.on('partner_disconnected', handlePartnerDisconnect);
+    socketService.on('partner_typing', handlePartnerTyping);
     socketService.on('message_updated', handleMessageUpdate);
     socketService.on('receive_reaction', handleReceiveReaction);
 
@@ -99,6 +110,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       socketService.off('receive_message', handleReceive);
       socketService.off('system_message', handleSystem);
       socketService.off('partner_disconnected', handlePartnerDisconnect);
+      socketService.off('partner_typing', handlePartnerTyping);
       socketService.off('message_updated', handleMessageUpdate);
       socketService.off('receive_reaction', handleReceiveReaction);
     };
@@ -127,11 +139,27 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     setShowEmojiPicker(null);
   };
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.value.length > input.length) {
+       audioService.playKeystroke();
+    }
+    setInput(e.target.value);
+    
+    socketService.emit('typing', { isTyping: e.target.value.length > 0 });
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      socketService.emit('typing', { isTyping: false });
+    }, 1500);
+  };
+
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
     
     audioService.playKeystroke();
+    socketService.emit('typing', { isTyping: false });
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     if (input.startsWith('/accept ')) {
        const type = input.split(' ')[1];
@@ -255,7 +283,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 relative z-10 backdrop-blur-[1px] scrollbar-hide">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 relative z-10 backdrop-blur-[1px] scrollbar-hide pb-10">
         {messages.map((m) => (
           <motion.div
             key={m.id}
@@ -338,6 +366,23 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             )}
           </motion.div>
         ))}
+
+        {partnerTyping && (
+          <motion.div 
+            initial={{ opacity: 0, y: 5 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            exit={{ opacity: 0 }}
+            className="text-[9px] sm:text-xs font-mono text-[var(--phos-color)]/50 uppercase ml-4 animate-pulse flex items-center gap-2"
+          >
+             <span>SIGNAL_DETECTED</span>
+             <div className="flex gap-1">
+               <span className="w-1 h-1 bg-[var(--phos-color)]/50 animate-bounce" style={{ animationDelay: '0ms' }} />
+               <span className="w-1 h-1 bg-[var(--phos-color)]/50 animate-bounce" style={{ animationDelay: '150ms' }} />
+               <span className="w-1 h-1 bg-[var(--phos-color)]/50 animate-bounce" style={{ animationDelay: '300ms' }} />
+             </div>
+          </motion.div>
+        )}
+
         <div ref={bottomRef} />
       </div>
 
@@ -349,13 +394,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
         <input 
           type="text" 
           value={input}
-          onChange={(e) => {
-            if (e.target.value.length > input.length) {
-               audioService.playKeystroke();
-            }
-            setInput(e.target.value);
-          }}
-          className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base py-2 px-1"
+          onChange={handleInputChange}
+          className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base py-2 px-1 focus:ring-0"
           placeholder="Message... / پیام..."
           autoFocus /* eslint-disable-line jsx-a11y/no-autofocus */
           autoComplete="off"

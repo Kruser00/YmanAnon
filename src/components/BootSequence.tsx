@@ -33,10 +33,11 @@ export function BootSequence({ onComplete }: { onComplete: () => void }) {
       { text: 'ANONYMITY LAYER: LOADED (AES-256_SIGNAL)', delay: 2000 },
       { text: `ENCRYPT_KEY: ${btoa(Math.random().toString()).slice(0, 16).toUpperCase()}`, delay: 2300 },
       { text: 'IDENTITY MATRIX: STABILIZED // NODE_SYNCED', delay: 2600 },
-      { text: 'KNOWLEDGE IS TEMPORARY.', delay: 3000 },
-      { text: 'NOTHING IS SAVED.', delay: 3400 },
-      { text: 'USE YOUR TIME WISELY.', delay: 3800 },
-      { text: 'TERMINAL.FA READY.', delay: 4200 }
+      { text: 'ECHO-7 CORE: AWAKENING... بیداری هسته اکو-۷', delay: 3000 },
+      { text: 'KNOWLEDGE IS TEMPORARY. / دانش موقتی است.', delay: 3400 },
+      { text: 'NOTHING IS SAVED. / هیچ چیز ذخیره نمی‌شود.', delay: 3800 },
+      { text: 'USE YOUR TIME WISELY. / از زمان خود عاقلانه استفاده کنید.', delay: 4200 },
+      { text: 'TERMINAL.FA READY.', delay: 4500 }
     ];
 
     bootSteps.forEach(({ text, delay }) => {

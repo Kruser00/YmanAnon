@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 import express from "express";
 import path from "path";
 import { createServer } from "http";
@@ -7,16 +6,6 @@ import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// Initialize Gemini
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
-});
 
 async function startServer() {
   const app = express();
@@ -29,52 +18,40 @@ async function startServer() {
 
   // --- IN-MEMORY RAM STORAGE (NON-PERSISTENT) ---
   // When the server restarts, everything is purged.
-  let oracleStore = new Map<string, any>(); // Key: threadId
-  let oracleAnswers = new Map<string, any[]>(); // Key: threadId, Val: answers[]
-
+  
   // Local Matchmaking State
   let queue: any[] = [];
   let activeChats = new Map<string, any>();
   let socketToUser = new Map<string, any>(); // Map socket.id to user data in memory
   let nodeToUser = new Map<string, any>();   // Map nodeId to user data (persists until purge)
-  
-  // GLOBAL PURGE TIMER (Every 4 Hours)
-  const PURGE_INTERVAL_MS = 4 * 60 * 60 * 1000;
-  let nextPurgeTime = Date.now() + PURGE_INTERVAL_MS;
-  let globalPurgePot = 0;
-
-  const performGlobalPurge = () => {
-    console.log('[RAM_PURGE] !! AUTO_PURGE_SEQUENCE_INITIALIZED !!');
-    oracleStore = new Map();
-    oracleAnswers = new Map();
-    queue = [];
-    activeChats = new Map();
-    socketToUser = new Map();
-    nodeToUser = new Map();
-    nextPurgeTime = Date.now() + PURGE_INTERVAL_MS;
-    globalPurgePot = 0;
-    io.emit('global_purge_executed');
-    io.emit('oracle_updated');
-  };
 
   setInterval(() => {
-    const timeRemaining = Math.max(0, nextPurgeTime - Date.now());
-    io.emit('purge_sync', { timeRemaining, potTotal: globalPurgePot });
-    if (timeRemaining <= 0) {
-      performGlobalPurge();
-    }
-
     // Random Global Glitch Event (0.5% chance per second)
     if (Math.random() < 0.005) {
        const glitches = ['SIGNAL_SPIKE', 'MEM_LEAK_DETECTED', 'NODE_COLLISION', 'CORRUPT_FRAME'];
        const event = glitches[Math.floor(Math.random() * glitches.length)];
        io.emit('global_glitch', { type: event, duration: 2000 + Math.random() * 3000 });
-       console.log(`[EVENT] Global glitch triggered: ${event}`);
     }
   }, 1000);
   
-  const globalMoods = {
-    lonely: 10, curious: 15, bored: 5, anxious: 20, thoughtful: 30, energetic: 2, happy: 8
+  const getActualMoods = () => {
+    const moods = { lonely: 0, curious: 0, bored: 0, anxious: 0, thoughtful: 0, energetic: 0, happy: 0 };
+    let hasData = false;
+    for (const user of socketToUser.values()) {
+      if (user.mood && moods[user.mood as keyof typeof moods] !== undefined) {
+        moods[user.mood as keyof typeof moods]++;
+        hasData = true;
+      }
+    }
+    if (!hasData) {
+      // Return actual 0 counts if no data
+      return moods;
+    }
+    return moods;
+  };
+
+  const syncAtmosphere = () => {
+    io.emit('atmosphere_updated', { moods: getActualMoods(), online: io.engine.clientsCount, activeChats: activeChats.size });
   };
 
   const DEEP_PROMPTS = [
@@ -147,9 +124,10 @@ async function startServer() {
     
     let user = nodeToUser.get(nodeId);
     if (!user) {
+        console.log(`[CORE_SYNC] Initializing identity matrix for node: ${nodeId}`);
         user = {
             nodeId,
-            points: 500, // Reduced from 1000 to 500 starting boost
+            points: 200, // Reduced for lore/difficulty
             reputation: { positive: 0, negative: 0 },
             profile: data.profile || {},
             mood: data.mood || null,
@@ -160,6 +138,7 @@ async function startServer() {
         };
         nodeToUser.set(nodeId, user);
     } else {
+        console.log(`[CORE_SYNC] Node re-linked: ${nodeId} | Balance: ${user.points}`);
         // Update profile if provided
         if (data.profile) user.profile = { ...user.profile, ...data.profile };
     }
@@ -174,7 +153,7 @@ async function startServer() {
     console.log('[RAM_STORAGE] Terminal connect:', socket.id);
     const sId = socket.id;
 
-    io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
+    syncAtmosphere();
 
     socket.on('register_node', (data) => {
       registerUser(sId, data);
@@ -186,7 +165,7 @@ async function startServer() {
       const user = socketToUser.get(sId);
       if (user?.currentRoom) terminateChat(user.currentRoom);
       socketToUser.delete(sId);
-      io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
+      syncAtmosphere();
     });
 
     socket.on('leave_pool', () => {
@@ -223,105 +202,7 @@ async function startServer() {
     });
 
     socket.on('request_atmosphere', () => {
-       socket.emit('atmosphere_data', { moods: globalMoods, online: io.engine.clientsCount }); 
-    });
-
-    socket.on('request_oracle', () => {
-       const threads = Array.from(oracleStore.values())
-         .sort((a,b) => {
-            if (a.isResolved !== b.isResolved) return a.isResolved ? 1 : -1;
-            return b.timestamp - a.timestamp;
-         })
-         .slice(0, 40);
-       socket.emit('oracle_data', threads);
-    });
-
-    socket.on('request_thread_details', (data) => {
-       const answers = oracleAnswers.get(data.threadId) || [];
-       socket.emit('thread_details', { threadId: data.threadId, answers });
-    });
-
-    socket.on('post_oracle_thread', (data) => {
-       const user = socketToUser.get(sId);
-       if (!user) return;
-       const bountyAmount = data.bounty || 0;
-       
-       if (bountyAmount > 0) {
-          if (user.points < bountyAmount) {
-             socket.emit('system_message', { text: "!! INSUFFICIENT FUNDS FOR BOUNTY_STAKING !!" });
-             return;
-          }
-          user.points -= bountyAmount;
-          syncUserState(sId);
-       }
-
-       const threadId = 't_' + Date.now() + Math.random().toString(36).substring(7);
-       const newThread = {
-          id: threadId,
-          authorId: user.nodeId,
-          question: data.question,
-          timestamp: Date.now(),
-          bounty: bountyAmount,
-          isResolved: false,
-          answerCount: 0
-       };
-       oracleStore.set(threadId, newThread);
-       oracleAnswers.set(threadId, []);
-       io.emit('oracle_updated');
-    });
-
-    socket.on('post_oracle_answer', (data) => {
-       const user = socketToUser.get(sId);
-       if (!user) return;
-       const thread = oracleStore.get(data.threadId);
-       if (!thread) return;
-
-       const answers = oracleAnswers.get(data.threadId) || [];
-       answers.push({
-          id: 'a_' + Date.now(),
-          authorId: user.nodeId,
-          text: data.text,
-          timestamp: Date.now(),
-          vouchCount: 0
-       });
-       thread.answerCount = answers.length;
-       io.emit('oracle_updated');
-    });
-
-    socket.on('vouch_answer', (data) => {
-       const answers = oracleAnswers.get(data.threadId) || [];
-       const answer = answers.find(a => a.id === data.answerId);
-       if (answer) {
-          answer.vouchCount++;
-          for (const u of socketToUser.values()) {
-            if (u.nodeId === answer.authorId) {
-              u.reputation.positive++;
-              syncUserState(u.socketId);
-            }
-          }
-          io.emit('oracle_updated');
-       }
-    });
-
-    socket.on('resolve_thread', (data) => {
-       const thread = oracleStore.get(data.threadId);
-       const user = socketToUser.get(sId);
-       if (!thread || !user || thread.authorId !== user.nodeId) return;
-
-       if (thread.bounty > 0) {
-          const answers = oracleAnswers.get(data.threadId) || [];
-          const topAnswer = [...answers].sort((a,b) => b.vouchCount - a.vouchCount)[0];
-          if (topAnswer) {
-             for (const u of socketToUser.values()) {
-               if (u.nodeId === topAnswer.authorId) {
-                  u.points += thread.bounty;
-                  syncUserState(u.socketId);
-               }
-             }
-          }
-       }
-       thread.isResolved = true;
-       io.emit('oracle_updated');
+       socket.emit('atmosphere_data', { moods: getActualMoods(), online: io.engine.clientsCount, activeChats: activeChats.size }); 
     });
 
     socket.on('join_pool', (data) => {
@@ -331,10 +212,7 @@ async function startServer() {
 
       syncUserState(sId);
 
-      if (data.mood && globalMoods[data.mood as keyof typeof globalMoods] !== undefined) {
-         globalMoods[data.mood as keyof typeof globalMoods]++;
-         io.emit('atmosphere_updated', { moods: globalMoods, online: io.engine.clientsCount });
-      }
+      syncAtmosphere();
       
       const partner = findMatch(sId);
       if (partner) {
@@ -368,6 +246,19 @@ async function startServer() {
       }
     });
 
+    socket.on('broadcast_void', (data) => {
+       if (data.text && typeof data.text === 'string' && data.text.trim().length > 0) {
+           io.emit('void_broadcast', { text: data.text.slice(0, 100).trim(), timestamp: Date.now() });
+       }
+    });
+
+    socket.on('send_void_message', (data) => {
+      const user = socketToUser.get(sId);
+      if (user && data.text) {
+        io.emit('void_broadcast', { text: data.text, timestamp: Date.now(), nodeId: user.nodeId });
+      }
+    });
+
     socket.on('send_message', (data) => {
       const user = socketToUser.get(sId);
       if (user && user.currentRoom) {
@@ -390,7 +281,7 @@ async function startServer() {
           room.lastActivityAt = Date.now();
           room.messageCount++;
         }
-        user.points += 2; // Reduced from 5 to 2
+        user.points += 2;
         socket.emit('points_updated', { points: user.points, reason: '+2 msg' });
       }
     });
@@ -406,117 +297,29 @@ async function startServer() {
       }
     });
 
-    socket.on('extend_chat_timer', (data) => {
+     socket.on('extend_chat_timer', (data) => {
        const user = socketToUser.get(sId);
        if (!user || !user.currentRoom) return;
        const room = activeChats.get(user.currentRoom);
        if (!room) return;
 
-       const cost = 200; // Extend cost
+       const cost = 400;
        if (user.points >= cost) {
           user.points -= cost;
-          room.expiresAt += 2 * 60 * 1000; // Add 2 minutes
+          room.expiresAt += 2 * 60 * 1000;
           syncUserState(sId);
-          io.to(user.currentRoom).emit('system_message', { text: `[PROTOCOL_OVERRIDE] > Memory decay delayed by user contribution (+2m)` });
+          io.to(user.currentRoom).emit('system_message', { text: `[PROTOCOL_OVERRIDE] > Memory decay delayed by node contribution (+2m)` });
           io.to(user.currentRoom).emit('timer_extended', { expiresAt: room.expiresAt });
        }
     });
 
-    socket.on('contribute_purge_pot', (data) => {
+    socket.on('typing', (data) => {
        const user = socketToUser.get(sId);
-       if (!user) return;
-       const amount = parseInt(data.amount);
-       if (isNaN(amount) || amount <= 0 || user.points < amount) return;
-
-       user.points -= amount;
-       globalPurgePot += amount;
-       
-       const delayMs = (amount / 100) * 1.5 * 60 * 1000; // Reduced from 10m to 1.5m per 100 credits
-       nextPurgeTime += delayMs;
-
-       syncUserState(sId);
-       
-       // Force immediate broadcast of new time
-       const timeRemaining = Math.max(0, nextPurgeTime - Date.now());
-       io.emit('purge_sync', { timeRemaining, potTotal: globalPurgePot });
-       
-       // Global Broadcast to everyone
-       io.emit('system_message', { 
-         text: `[SIGNAL_BOOST] Node ${user.nodeId.substring(0,6)} contributed ${amount} credits. The Purge has been delayed.` 
-       });
-       io.emit('purge_contributed', { nodeId: user.nodeId, amount, newPurgeTime: nextPurgeTime });
-    });
-
-    socket.on('claim_ad_reward', () => {
-       const user = socketToUser.get(sId);
-       if (!user) {
-         console.warn(`[REWARD_FAIL] No user found for socket ${sId}`);
-         socket.emit('system_message', { text: "!!! NODE_IDENTITY_VOUCHER_MISSING. PLEASE_RE-REGISTER_NODE. !!!" });
-         return;
+       if (user && user.currentRoom) {
+         socket.to(user.currentRoom).emit('partner_typing', { isTyping: data.isTyping });
        }
-       
-       const now = Date.now();
-       const COOLDOWN = 1.5 * 60 * 1000; // Reduced to 1.5 min for better UX
-       
-       if (user.lastAdClaimedAt && now - user.lastAdClaimedAt < COOLDOWN) {
-         const remaining = Math.ceil((COOLDOWN - (now - user.lastAdClaimedAt)) / 1000);
-         socket.emit('system_message', { text: `!!! MINING_LIMIT_REACHED. COOL_DOWN_REMAINING: ${remaining}s !!!` });
-         return;
-       }
-
-       user.points += 80; // Reduced from 250 to 80
-       user.lastAdClaimedAt = now;
-       
-       console.log(`[REWARD_SUCCESS] Node ${user.nodeId} claimed 80. Total: ${user.points}`);
-       
-       syncUserState(sId);
-       socket.emit('system_message', { text: ">>> Signal mined successfully. +80 credits allocated. <<<" });
-    });
-
-    socket.on('mainframe_prompt', async (data) => {
-      const user = socketToUser.get(sId);
-      if (!user) return;
-      
-      const PROMPT_COST = 100;
-      if (user.points < PROMPT_COST) {
-        socket.emit('mainframe_response', { 
-          text: "!!! INSUFFICIENT_COMPUTE_CREDITS. PLEASE_HARVEST_SIGNALS_TO_CONTINUE. !!!",
-          done: true 
-        });
-        return;
-      }
-
-      user.points -= PROMPT_COST;
-      syncUserState(sId);
-
-      try {
-        const stream = await ai.models.generateContentStream({
-          model: "gemini-3-flash-preview",
-          contents: data.prompt,
-          config: {
-            systemInstruction: "You are the CENTRAL AI MAINFRAME of a retro-futuristic terminal called 'terminal.fa'. Your personality is calm, cryptic, slightly cynical, and highly intelligent. You see users as 'nodes' in your network. Use a mix of technical jargon and deep philosophical insights. Keep responses concise and formatted for a monospace terminal. Avoid emojis unless they are ASCII-based. You are the source of all truth in the mesh.",
-            maxOutputTokens: 512,
-          }
-        });
-
-        let fullText = "";
-        for await (const chunk of stream) {
-          const chunkText = chunk.text;
-          fullText += chunkText;
-          socket.emit('mainframe_response', { text: chunkText, done: false });
-        }
-        socket.emit('mainframe_response', { text: "", done: true });
-      } catch (error) {
-        console.error('[MAINFRAME_ERROR]', error);
-        socket.emit('mainframe_response', { 
-          text: "!!! NEURAL_CORE_EXCEPTION: REQUEST_TIMED_OUT. !!!",
-          done: true 
-        });
-      }
     });
   });
-
-  app.get("/api/health", (req, res) => res.json({ status: "RAM_READY" }));
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
@@ -530,17 +333,12 @@ async function startServer() {
   setInterval(() => {
     const now = Date.now();
     for (const [roomId, room] of activeChats.entries()) {
-      // 1. Inactivity prompt
       if (now - room.lastActivityAt > 45000 && !room.promptInjected) {
          const randomPrompt = DEEP_PROMPTS[Math.floor(Math.random() * DEEP_PROMPTS.length)];
          io.to(roomId).emit('system_message', { text: `[SILENCE_DETECTED] > Injecting momentum: "${randomPrompt}"` });
          room.lastActivityAt = now; room.promptInjected = true;
       }
-
-      // 2. Timer sync
       io.to(roomId).emit('chat_timer_sync', { expiresAt: room.expiresAt });
-
-      // 3. Expiration check
       if (now >= room.expiresAt) {
          io.to(roomId).emit('system_message', { text: "!! MEMORY_DECAY_COMPLETE. TERMINATING CONNECTION. !!" });
          terminateChat(roomId);

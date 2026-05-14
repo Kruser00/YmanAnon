@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { User, ShieldAlert, Heart, Eye, Terminal } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -10,18 +10,26 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTerminal, reputation, voidMessages, atmosphere, purgePotTotal }: { onFindConnection: () => void, onOpenOracle: () => void, onOpenAdTerminal: () => void, reputation: { positive: number, negative: number }, voidMessages: any[], atmosphere: any, purgePotTotal: number }) {
+export function DashboardScreen({ onFindConnection, reputation, voidMessages, atmosphere }: { onFindConnection: () => void, reputation: { positive: number, negative: number }, voidMessages: any[], atmosphere: any }) {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
-  const [isContributing, setIsContributing] = useState(false);
-  const [contributeAmount, setContributeAmount] = useState(100);
+  const [voidInput, setVoidInput] = useState("");
+  const voidBottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     socketService.emit('request_atmosphere', {});
   }, []);
 
-  const handleContribute = () => {
-    socketService.emit('contribute_purge_pot', { amount: contributeAmount });
-    setIsContributing(false);
+  useEffect(() => {
+    if (voidBottomRef.current) {
+      voidBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [voidMessages]);
+
+  const handleVoidSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!voidInput.trim()) return;
+    socketService.emit('broadcast_void', { text: voidInput });
+    setVoidInput('');
     audioService.playKeystroke();
   };
 
@@ -31,9 +39,6 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
     'network': 'GLOBAL_MESH_STATUS. وضعیت شبکه جهانی. فعال‌سازی تمامی گره‌ها.',
     'reputation': 'TRUST_QUOTIENT. شاخص اعتماد. اعتبار شما در هسته عصبی.',
     'void': 'GLOBAL_BROADCAST. پخش عمومی سیگنال‌های صوتی. خروجی در تمام ترمینال‌ها.',
-    'oracle': 'NEURAL_CORE_ACCESS. دسترسی به هوش مرکزی و شبکه دانش کاربران.',
-    'pot': 'RESOURCE_CONSERVATION. ذخیره منابع. مشارکت جمعی برای به تاخیر انداختن بازنشانی سیستم.',
-    'signal': 'SIGNAL_HARVESTER. برداشت امتیاز برای فعالیت در هسته عصبی.'
   };
 
   return (
@@ -108,7 +113,7 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
             )}
           >
             <User size={12} className="text-[var(--phos-color)]" />
-             <span className="phosphor-glow font-mono uppercase">{atmosphere.online > 999 ? (atmosphere.online/1000).toFixed(1) + 'k' : atmosphere.online} ACTIVE_NODES</span>
+             <span className="phosphor-glow font-mono uppercase">{atmosphere.online > 999 ? (atmosphere.online/1000).toFixed(1) + 'k' : atmosphere.online} NODES / {atmosphere.activeChats || 0} LINKS</span>
           </div>
           <div 
             onClick={() => { audioService.playKeystroke(); setActiveInfo(activeInfo === 'reputation' ? null : 'reputation'); }}
@@ -176,144 +181,75 @@ export function DashboardScreen({ onFindConnection, onOpenOracle, onOpenAdTermin
         </div>
 
         <div className="flex-1 flex flex-col gap-4">
-           {/* Global Purge Pot UI */}
           <div 
-            onClick={() => { audioService.playKeystroke(); setActiveInfo(activeInfo === 'pot' ? null : 'pot'); }}
-            onMouseEnter={() => setActiveInfo('pot')} 
-            onMouseLeave={() => setActiveInfo(null)}
-            className={cn(
-              "border border-yellow-500/20 p-3 sm:p-4 bg-yellow-500/5 flex flex-col cursor-help transition-all relative overflow-hidden",
-              activeInfo === 'pot' ? "border-yellow-500/60 bg-yellow-500/10" : "hover:border-yellow-500/40 hover:bg-yellow-500/5"
-            )}
-          >
-            <div className="flex justify-between items-center border-b border-yellow-500/20 pb-1 mb-2">
-              <h3 className="text-yellow-500 uppercase text-[9px] sm:text-[10px] tracking-widest font-bold">RESOURCE_CONSERVATION_POOL</h3>
-              <div className="text-[7px] text-yellow-500/50">SYSTEM_STABILIZATION</div>
-            </div>
-            
-            <div className="flex items-end justify-between mb-2">
-              <div className="flex flex-col flex-1">
-                <div className="flex items-center gap-1 mb-2">
-                  {Array.from({ length: 14 }).map((_, i) => (
-                    <motion.div 
-                      key={i}
-                      animate={{ 
-                        opacity: purgePotTotal > i * 150 ? [0.4, 1, 0.4] : 0.1,
-                        height: purgePotTotal > i * 150 ? [6, 12, 6] : 4,
-                        backgroundColor: purgePotTotal > i * 150 ? "#eab308" : "#422006"
-                      }}
-                      transition={{ 
-                        repeat: Infinity, 
-                        duration: Math.max(1, 3 - (purgePotTotal / 2000)),
-                        delay: i * 0.08 
-                      }}
-                      className="w-1.5 rounded-full"
-                      style={{ boxShadow: purgePotTotal > i * 150 ? '0 0 8px rgba(234, 179, 8, 0.4)' : 'none' }}
-                    />
-                  ))}
-                </div>
-                <span className="text-sm sm:text-2xl font-mono text-yellow-500 font-bold phosphor-glow leading-none">{purgePotTotal}</span>
-                <span className="text-[8px] uppercase opacity-50 font-mono tracking-tighter">GLOBAL_STABILITY_INDEX</span>
-              </div>
-              <button 
-                onClick={(e) => { e.stopPropagation(); setIsContributing(!isContributing); }}
-                className="bg-yellow-500 text-black text-[10px] px-3 py-2 uppercase tracking-tighter hover:bg-yellow-400 transition-all font-bold shadow-[0_0_15px_rgba(234,179,8,0.2)] active:scale-95"
-              >
-                {isContributing ? '[ ABORT ]' : 'ALLOCATE'}
-              </button>
-            </div>
-
-            {isContributing && (
-               <div className="mt-2 pt-2 border-t border-yellow-500/10 flex items-center justify-between gap-2">
-                  <div className="flex-1 flex items-center gap-1">
-                    <button onClick={(e) => { e.stopPropagation(); setContributeAmount(Math.max(100, contributeAmount - 100)); }} className="w-6 h-6 border border-yellow-500/30 flex items-center justify-center hover:bg-yellow-500/20">-</button>
-                    <span className="flex-1 text-center font-mono text-xs text-yellow-500">{contributeAmount}</span>
-                    <button onClick={(e) => { e.stopPropagation(); setContributeAmount(contributeAmount + 100); }} className="w-6 h-6 border border-yellow-500/30 flex items-center justify-center hover:bg-yellow-500/20">+</button>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); handleContribute(); }} className="bg-yellow-500/20 border border-yellow-500/50 text-yellow-500 text-[9px] px-2 py-1 uppercase hover:bg-yellow-500/40">Inject</button>
-               </div>
-            )}
-
-            <div className="text-[7px] sm:text-[8px] opacity-40 font-sans italic">
-              "System maintenance is everyone's responsibility."
-            </div>
-          </div>
-
-          <div 
-            onClick={() => { audioService.playKeystroke(); setActiveInfo(activeInfo === 'void' ? null : 'void'); }}
+            onClick={() => { setActiveInfo(activeInfo === 'void' ? null : 'void'); }}
             onMouseEnter={() => setActiveInfo('void')} 
             onMouseLeave={() => setActiveInfo(null)}
             className={cn(
-               "flex-1 border border-[var(--phos-color)]/20 p-3 sm:p-4 bg-black/20 flex flex-col cursor-help transition-colors",
+               "flex-1 border border-[var(--phos-color)]/20 p-3 sm:p-4 bg-black/20 flex flex-col overflow-hidden transition-colors h-[250px] sm:h-[350px]",
                activeInfo === 'void' ? "border-[var(--phos-color)]/60 bg-[var(--phos-color)]/5" : "hover:border-[var(--phos-color)]/40 hover:bg-black/30"
             )}
           >
-            <div className="flex justify-between items-center border-b border-[var(--phos-color)]/20 pb-1 mb-2">
+            <div className="flex justify-between items-center border-b border-[var(--phos-color)]/20 pb-1 mb-2 shrink-0">
               <h3 className="phosphor-dim uppercase text-[10px] tracking-widest font-mono">GLOBAL_BROADCAST</h3>
-              <div className="text-[8px] animate-pulse">LIVE</div>
+              <div className="text-[8px] animate-pulse flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-bounce"></span>
+                LIVE
+              </div>
             </div>
-            <div className="flex-1 space-y-2 sm:space-y-3 overflow-y-auto max-h-[60px] sm:max-h-[80px] scrollbar-hide">
+            <div className="flex-1 space-y-1 overflow-y-auto scrollbar-hide flex flex-col">
               {voidMessages.length === 0 ? (
-                 <div className="text-[9px] opacity-30 italic font-mono text-center mt-2">Static noise...</div>
+                 <div className="text-[9px] opacity-30 italic font-mono text-center mt-auto mb-auto">Static noise...</div>
               ) : voidMessages.map((m, i) => (
                  <motion.div 
                    key={i} 
-                   initial={{ opacity: 0, x: 10 }}
+                   initial={{ opacity: 0, x: -10 }}
                    animate={{ opacity: 1, x: 0 }}
-                   className="font-mono text-[9px] sm:text-[10px] border-l border-[var(--phos-color)]/40 pl-3 py-0.5"
+                   className="font-mono text-[9px] sm:text-[11px] hover:bg-[var(--phos-color)]/10 px-1 py-0.5 rounded flex items-start gap-2 break-all"
                  >
-                   <div className="phosphor-glow italic whitespace-pre-wrap">"{m.text}"</div>
+                   <span className="opacity-50 shrink-0 select-none">[{new Date(m.timestamp || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}]</span>
+                   <span className="font-bold shrink-0">{m.nodeId ? `${m.nodeId.substring(0, 6)}:` : 'SYS:'}</span>
+                   <span className="phosphor-glow whitespace-pre-wrap flex-1">{m.text}</span>
                  </motion.div>
               ))}
+              <div ref={voidBottomRef} className="shrink-0"></div>
             </div>
+            <form onSubmit={handleVoidSubmit} className="mt-2 border-t border-[var(--phos-color)]/20 pt-2 flex items-center gap-2 shrink-0">
+              <span className="opacity-50 text-[10px] select-none">&gt;</span>
+              <input 
+                type="text" 
+                value={voidInput}
+                onChange={(e) => setVoidInput(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="flex-1 bg-transparent outline-none text-[10px] sm:text-xs text-[var(--phos-color)] placeholder:opacity-30"
+                placeholder="Broadcast to all nodes..."
+                maxLength={120}
+              />
+            </form>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 font-mono relative z-10 px-4">
-        <button 
-           onClick={() => { audioService.playKeystroke(); onOpenOracle(); }}
-           onMouseEnter={() => setActiveInfo('oracle')} 
-           onMouseLeave={() => setActiveInfo(null)}
-           className="border border-[var(--phos-color)] p-3 sm:p-5 hover:bg-[var(--phos-color)]/10 hover:shadow-[0_0_15px_var(--phos-color)] transition-all flex flex-row sm:flex-col items-center justify-start sm:justify-center gap-4 sm:gap-1 relative overflow-hidden group"
-        >
-           <Eye size={18} className="text-[var(--phos-color)] group-hover:animate-pulse" />
-           <div className="flex flex-col items-start sm:items-center">
-             <span className="uppercase tracking-widest text-sm sm:text-base relative z-10">NEURAL_CORE</span>
-             <span className="font-sans text-xs sm:text-sm text-[var(--phos-color)]/80 relative z-10">دسترسی به هسته</span>
-           </div>
-        </button>
+      <div className="flex flex-col font-mono relative z-10 px-4">
         <button 
            onClick={() => { audioService.playKeystroke(); onFindConnection(); }}
            onMouseEnter={() => setActiveInfo('match')} 
            onMouseLeave={() => setActiveInfo(null)}
-           className="border bg-[var(--phos-color)]/10 border-[var(--phos-color)] p-3 sm:p-5 hover:bg-[var(--phos-color)]/20 hover:shadow-[0_0_15px_var(--phos-color)] transition-all flex flex-row sm:flex-col items-center justify-start sm:justify-center gap-4 sm:gap-1 relative overflow-hidden group"
+           className="w-full border-2 bg-[var(--phos-color)]/10 border-[var(--phos-color)] p-4 sm:p-6 hover:bg-[var(--phos-color)]/20 hover:shadow-[0_0_20px_var(--phos-color)] transition-all flex flex-col items-center justify-center gap-3 relative overflow-hidden group"
         >
-           <Heart size={18} className="text-[var(--phos-color)] group-hover:animate-pulse" />
-           <div className="flex flex-col items-start sm:items-center">
-             <span className="uppercase tracking-widest text-sm sm:text-base relative z-10 font-bold">NODE_CONNECT</span>
-             <span className="font-sans text-xs sm:text-sm text-[var(--phos-color)]/80 relative z-10">اتصال گره‌ها</span>
+           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[var(--phos-color)]/10 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
+           <Heart size={32} className="text-[var(--phos-color)] group-hover:animate-pulse group-hover:scale-110 transition-transform" />
+           <div className="flex flex-col items-center flex-1 w-full max-w-md">
+             <span className="uppercase tracking-[0.3em] text-lg sm:text-2xl relative z-10 font-bold phosphor-glow text-center">NODE_CONNECT</span>
+             <span className="font-sans text-sm sm:text-base text-[var(--phos-color)] relative z-10 mt-1 mb-2 text-center font-bold">اتصال ناشناس به گره تصادفی</span>
+             <p className="text-[10px] sm:text-[11px] font-sans opacity-70 text-center leading-relaxed max-w-sm">
+               جهت آغاز یک گفتگوی ناشناس، رمزنگاری شده و زمان‌دار با کاربری دیگر در این شبکه. این ارتباط پس از منقضی شدن زمان به طور دائم پاک می‌شود.
+             </p>
            </div>
         </button>
       </div>
 
-      <div className="px-4 pb-4 mt-4">
-        <button 
-           onClick={() => { audioService.playKeystroke(); onOpenAdTerminal(); }}
-           onMouseEnter={() => setActiveInfo('signal')} 
-           onMouseLeave={() => setActiveInfo(null)}
-           className="w-full border-2 border-yellow-500/40 p-3 sm:p-4 hover:bg-yellow-500/10 hover:shadow-[0_0_15px_rgba(234,179,8,0.3)] transition-all flex flex-row items-center gap-3 group relative overflow-hidden bg-yellow-500/5 group"
-        >
-           <Terminal size={14} className="text-yellow-500 group-hover:animate-bounce" />
-           <div className="flex flex-col items-start text-left">
-             <span className="uppercase tracking-widest text-xs sm:text-sm text-yellow-500 font-bold leading-tight">SIGNAL_HARVESTER [0x99]</span>
-             <span className="text-[8px] sm:text-[9px] text-yellow-500/60 leading-none">EXTRACT_COMPUTE_CREDITS_FROM_NOISE</span>
-           </div>
-           <div className="ml-auto text-yellow-500 font-bold text-xs sm:text-sm phosphor-glow animate-pulse">+250</div>
-        </button>
-      </div>
-
-      <div className="mt-2 sm:mt-6 text-center opacity-40 px-4 pb-6">
+      <div className="mt-6 text-center opacity-40 px-4 pb-6">
         <div className="text-[7px] sm:text-[9px] uppercase tracking-[0.2em] font-mono animate-pulse mb-1 leading-relaxed">
           KNOWLEDGE IS TEMPORARY // NOTHING IS SAVED // USE YOUR TIME WISELY
         </div>

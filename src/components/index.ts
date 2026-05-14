@@ -6,7 +6,5 @@ export * from './MatchingScreen';
 export * from './ConversationStatsScreen';
 export * from './RatingScreen';
 export * from './DashboardScreen';
-export * from './OracleScreen';
 export * from './ChatBootSequence';
 export * from './ChatScreen';
-export * from './AdTerminal';

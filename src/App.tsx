@@ -14,11 +14,10 @@ import {
   ChatBootSequence, 
   ChatScreen, 
   ConversationStatsScreen, 
-  RatingScreen,
-  AdTerminal
+  RatingScreen
 } from './components';
 
-type AppState = 'START' | 'BOOT' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'ORACLE' | 'RATING' | 'CHAT_STATS' | 'AD_TERMINAL';
+type AppState = 'START' | 'BOOT' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'RATING' | 'CHAT_STATS';
 type Theme = 'green' | 'amber';
 
 export default function App() {
@@ -36,8 +35,6 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>('green');
   const [nodeId, setNodeId] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [purgeSecondsRemaining, setPurgeSecondsRemaining] = useState<number | null>(null);
-  const [purgePotTotal, setPurgePotTotal] = useState<number>(0);
   const [isGlitching, setIsGlitching] = useState(false);
 
   useEffect(() => {
@@ -69,7 +66,7 @@ export default function App() {
     });
 
     socketService.on('void_broadcast', (data: any) => {
-      setVoidMessages(prev => [data, ...prev].slice(0, 3));
+      setVoidMessages(prev => [...prev, data].slice(-100)); // keep last 100 msgs, newest at bottom
     });
 
     socketService.on('atmosphere_updated', (data: any) => {
@@ -83,19 +80,6 @@ export default function App() {
     socketService.on('user_state_sync', (data: any) => {
       if (data.points !== undefined) setPoints(data.points);
       if (data.reputation !== undefined) setReputation(data.reputation);
-    });
-
-    socketService.on('purge_sync', (data: any) => {
-      setPurgeSecondsRemaining(Math.floor(data.timeRemaining / 1000));
-      if (data.potTotal !== undefined) setPurgePotTotal(data.potTotal);
-    });
-
-    socketService.on('global_purge_executed', () => {
-      // Clear local non-persistent UI states if needed
-      setVoidMessages([]);
-      // Points will be updated via user_state_sync from server
-      setReputation({ positive: 0, negative: 0 });
-      setAppState(current => (current === 'CHAT' || current === 'MATCHING' ? 'DASHBOARD' : current));
     });
     
     socketService.on('global_glitch', (data: any) => {
@@ -114,8 +98,6 @@ export default function App() {
       socketService.off('atmosphere_updated');
       socketService.off('points_updated');
       socketService.off('user_state_sync');
-      socketService.off('purge_sync');
-      socketService.off('global_purge_executed');
       socketService.off('global_glitch');
     };
   }, []); // Only register once
@@ -150,17 +132,8 @@ export default function App() {
     }
   };
 
-  const formatPurgeTime = (seconds: number) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const isPurgeClose = purgeSecondsRemaining !== null && purgeSecondsRemaining < 60;
-
   return (
-    <div className={`crt-screen h-screen w-screen overflow-hidden bg-black selection:bg-[var(--phos-color)] selection:text-black ${isPurgeClose || isGlitching ? 'fx-jitter' : ''} ${isGlitching ? 'fx-aberration' : ''}`}>
+    <div className={`crt-screen h-screen w-screen overflow-hidden bg-black selection:bg-[var(--phos-color)] selection:text-black ${isGlitching ? 'fx-aberration' : ''}`}>
       <div className="crt-scanline-bar" />
       <div className="crt-overlay" />
       <div className="crt-bottom-fade" />
@@ -175,15 +148,6 @@ export default function App() {
                 <span className="phosphor-glow font-bold tracking-widest uppercase cursor-pointer text-sm sm:text-base" onClick={() => { if(appState !== 'START' && appState !== 'BOOT') setAppState('DASHBOARD'); }}>
                   TERMINAL.FA
                 </span>
-                {purgeSecondsRemaining !== null && appState !== 'BOOT' && appState !== 'START' && (
-                  <div className="ml-2 sm:ml-4 flex items-center gap-1.5 border-l border-[var(--phos-color)]/20 pl-2 sm:pl-4">
-                    <span className="text-[7px] sm:text-[9px] uppercase tracking-tighter opacity-50 font-mono hidden xs:inline pr-1">DATA_PURGE_IN:</span>
-                    <span className="text-[9px] font-sans opacity-50 hidden md:inline">پاکسازی داده‌ها در:</span>
-                    <span className="text-[10px] sm:text-sm font-mono text-red-500 phosphor-glow tracking-widest">
-                      {formatPurgeTime(purgeSecondsRemaining)}
-                    </span>
-                  </div>
-                )}
               </div>
               <div className="flex items-center gap-3 text-[7px] sm:text-[9px] font-mono opacity-60">
                 <span className="flex items-center gap-1"><Cpu size={10} /> {nodeId}</span>
@@ -247,19 +211,10 @@ export default function App() {
                 <motion.div key="dashboard" exit={{ opacity: 0 }} className="h-full">
                   <DashboardScreen 
                     onFindConnection={() => setAppState('MOOD')} 
-                    onOpenOracle={() => setAppState('ORACLE')} 
-                    onOpenAdTerminal={() => setAppState('AD_TERMINAL')}
                     reputation={reputation} 
                     voidMessages={voidMessages} 
                     atmosphere={atmosphere} 
-                    purgePotTotal={purgePotTotal}
                   />
-                </motion.div>
-              )}
-
-              {appState === 'ORACLE' && (
-                <motion.div key="oracle" exit={{ opacity: 0 }} className="h-full">
-                  <OracleScreen onBack={() => setAppState('DASHBOARD')} nodeId={nodeId || ""} points={points} />
                 </motion.div>
               )}
 
@@ -331,12 +286,6 @@ export default function App() {
               {appState === 'RATING' && (
                 <motion.div key="rating" exit={{ opacity: 0 }} className="h-full">
                   <RatingScreen onComplete={() => setAppState('DASHBOARD')} />
-                </motion.div>
-              )}
-
-              {appState === 'AD_TERMINAL' && (
-                <motion.div key="ad" exit={{ opacity: 0 }} className="h-full">
-                  <AdTerminal onComplete={() => setAppState('DASHBOARD')} />
                 </motion.div>
               )}
             </AnimatePresence>
