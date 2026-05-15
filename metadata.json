@@ -1,6 +1,6 @@
 {
   "name": "Terminal.fa",
   "description": "A retro-future terminal for deep, anonymous connections. Features a Neural Core AI Mainframe for cryptic wisdom, an Oracle for node-to-node knowledge exchange, and a point-based economy for system stabilization.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

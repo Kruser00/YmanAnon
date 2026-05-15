@@ -28,6 +28,9 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const [callActive, setCallActive] = useState(false);
   const [incomingCall, setIncomingCall] = useState<any>(null);
   
+  const isVoiceAvailable = voiceUnlocked || partnerVoiceUnlocked;
+  const isVideoAvailable = videoUnlocked || partnerVideoUnlocked;
+  
   const iceCandidateQueue = useRef<any[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -432,36 +435,41 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
          <div className="absolute inset-0 bg-red-900/10 pointer-events-none z-50" />
       )}
       
-      <button 
-        onClick={() => { audioService.playKeystroke(); socketService.emit('leave_pool', {}); }} 
-        className="absolute top-2 right-2 p-1 px-2 hover:bg-[var(--phos-color)]/20 text-[9px] sm:text-[10px] font-mono uppercase border border-[var(--phos-color)]/30 text-red-500 z-30 bg-black/60 backdrop-blur-sm"
-      >
-          Disconnect / قطع اتصال
-      </button>
-
-      {secondsRemaining !== null && (
-        <div className="absolute top-2 left-2 flex items-center gap-2 z-30 bg-black/60 backdrop-blur-sm p-1 px-2 border border-yellow-500/30">
-          <div className="flex flex-col">
-            <span className="text-[8px] uppercase tracking-tighter text-yellow-500/70 font-mono">Memory Decay / زوال حافظه</span>
-            <span className={cn(
-               "text-xs sm:text-sm font-bold font-mono phosphor-glow leading-none",
-               secondsRemaining < 30 ? "text-red-500 fx-jitter" : "text-yellow-500"
-            )}>
-              {Math.floor(secondsRemaining / 60)}:{Math.floor(secondsRemaining % 60).toString().padStart(2, '0')}
-            </span>
-          </div>
-          <button 
-            onClick={handleProlong}
-            disabled={points < 200}
-            className="bg-yellow-500/10 border border-yellow-500/40 text-yellow-500 text-[8px] px-1.5 py-1 uppercase hover:bg-yellow-500/20 disabled:opacity-30 transition-all font-bold ml-1"
-          >
-            Delay (200) / تمدید
-          </button>
+      {/* Top Header - Using flex instead of absolute positioning to prevent overlap */}
+      <div className="flex justify-between items-center bg-black/60 backdrop-blur-sm border-b border-[var(--phos-color)]/20 p-2 z-30">
+        <div>
+          {secondsRemaining !== null && (
+            <div className="flex items-center gap-2 border border-yellow-500/30 p-1 px-2">
+              <div className="flex flex-col">
+                <span className="text-[8px] uppercase tracking-tighter text-yellow-500/70 font-mono">Memory Decay / زوال حافظه</span>
+                <span className={cn(
+                   "text-xs sm:text-sm font-bold font-mono phosphor-glow leading-none",
+                   secondsRemaining < 30 ? "text-red-500 fx-jitter" : "text-yellow-500"
+                )}>
+                  {Math.floor(secondsRemaining / 60)}:{Math.floor(secondsRemaining % 60).toString().padStart(2, '0')}
+                </span>
+              </div>
+              <button 
+                onClick={handleProlong}
+                disabled={points < 200}
+                className="bg-yellow-500/10 border border-yellow-500/40 text-yellow-500 text-[8px] px-1.5 py-1 uppercase hover:bg-yellow-500/20 disabled:opacity-30 transition-all font-bold ml-1"
+              >
+                Delay (200) / تمدید
+              </button>
+            </div>
+          )}
         </div>
-      )}
+        <button 
+          onClick={() => { audioService.playKeystroke(); socketService.emit('leave_pool', {}); }} 
+          className="p-1 px-2 hover:bg-[var(--phos-color)]/20 text-[9px] sm:text-[10px] font-mono uppercase border border-[var(--phos-color)]/30 text-red-500 flex flex-col items-center"
+        >
+            <span>Disconnect</span>
+            <span className="font-sans text-[10px]">قطع اتصال</span>
+        </button>
+      </div>
 
       {/* Identity Store / Actions Sidebar */}
-      <div className="border-b border-[var(--phos-color)]/20 p-2 pt-10 sm:pt-2 flex gap-2 sm:gap-4 overflow-x-auto whitespace-nowrap text-[10px] sm:text-xs scrollbar-hide relative z-20 bg-black/20">
+      <div className="border-b border-[var(--phos-color)]/20 p-2 flex gap-2 sm:gap-4 overflow-x-auto whitespace-nowrap text-[10px] sm:text-xs scrollbar-hide relative z-20 bg-black/20">
         <span className="phosphor-dim uppercase py-1 hidden lg:inline">Exchange:</span>
         <button 
           onClick={() => onPointsSpent(300, 'Age')}
@@ -693,24 +701,26 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
         )}
 
         {/* Start Call UI if unlocked */}
-        {!callActive && voiceUnlocked && partnerVoiceUnlocked && (
+        {!callActive && isVoiceAvailable && (
            <div className="flex justify-center p-2 mb-2">
               <button 
                 onClick={startVoiceCall}
-                className="border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-1 text-[10px] uppercase tracking-widest hover:bg-[var(--phos-color)]/30 font-mono"
+                className="border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-1 flex flex-col items-center hover:bg-[var(--phos-color)]/30"
               >
-                 START_VOICE_LINK
+                 <span className="text-[10px] uppercase tracking-widest font-mono">INITIATE_VOICE_LINK</span>
+                 <span className="font-sans text-[11px]">شروع تماس صوتی</span>
               </button>
            </div>
         )}
         
-        {!callActive && videoUnlocked && partnerVideoUnlocked && (
+        {!callActive && isVideoAvailable && (
            <div className="flex justify-center p-2 mb-2">
               <button 
                 onClick={startVideoCall}
-                className="border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-1 text-[10px] uppercase tracking-widest hover:bg-[var(--phos-color)]/30 font-mono"
+                className="border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-1 flex flex-col items-center hover:bg-[var(--phos-color)]/30"
               >
-                 START_VIDEO_LINK
+                 <span className="text-[10px] uppercase tracking-widest font-mono">INITIATE_VIDEO_LINK</span>
+                 <span className="font-sans text-[11px]">شروع تماس تصویری</span>
               </button>
            </div>
         )}
@@ -720,18 +730,20 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
               <div className="font-mono text-sm uppercase tracking-widest animate-pulse">
                  Incoming {incomingCall.withVideo ? 'Video' : 'Voice'} Transmission...
               </div>
-              <div className="flex gap-4">
+              <div className="flex gap-4 w-full px-4">
                  <button 
                    onClick={acceptCall}
-                   className="border border-[var(--phos-color)] px-4 py-2 hover:bg-[var(--phos-color)]/20 font-mono text-xs uppercase transition-colors"
+                   className="border border-[var(--phos-color)] px-4 py-2 hover:bg-[var(--phos-color)]/20 font-mono text-xs uppercase flex-1 flex flex-col justify-center items-center gap-1 transition-colors"
                  >
-                   Accept
+                   <span>Accept</span>
+                   <span className="font-sans">پذیرش</span>
                  </button>
                  <button 
                    onClick={() => setIncomingCall(null)}
-                   className="border border-red-500/50 text-red-500/80 px-4 py-2 hover:bg-red-500/20 font-mono text-xs uppercase transition-colors"
+                   className="border border-red-500/50 text-red-500/80 px-4 py-2 hover:bg-red-500/20 font-mono text-xs uppercase flex-1 flex flex-col justify-center items-center gap-1 transition-colors"
                  >
-                   Reject
+                   <span>Reject</span>
+                   <span className="font-sans">رد کردن</span>
                  </button>
               </div>
            </div>
@@ -765,8 +777,9 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
              </svg>
              <span className="font-mono text-[10px] group-hover:text-black uppercase tracking-wider font-bold">50 PTS</span>
           </div>
-          <div className="absolute bottom-10 left-0 hidden group-hover:block whitespace-nowrap bg-black text-[9px] text-[var(--phos-color)] border border-[var(--phos-color)] p-1 z-50">
-             Send self-destructing image
+          <div className="absolute bottom-10 left-0 hidden group-hover:flex whitespace-nowrap bg-black text-[9px] text-[var(--phos-color)] border border-[var(--phos-color)] p-1 z-50 flex-col items-start gap-1">
+             <span>Send self-destructing image [30s]</span>
+             <span className="font-sans opacity-80">ارسال تصویر یکبار مصرف (۳۰ ثانیه)</span>
           </div>
         </label>
         
@@ -778,7 +791,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
           value={input}
           onChange={handleInputChange}
           className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base py-2 px-1 focus:ring-0 min-w-0"
-          placeholder="Message... (type / for cmds)"
+          placeholder="پیام خود را بنویسید... Message..."
           autoFocus /* eslint-disable-line jsx-a11y/no-autofocus */
           autoComplete="off"
           dir="auto"

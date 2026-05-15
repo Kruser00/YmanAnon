@@ -34,7 +34,8 @@ async function startServer() {
   
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
-    cors: { origin: '*' }
+    cors: { origin: '*' },
+    maxHttpBufferSize: 1e8 // 100 MB
   });
 
   // --- IN-MEMORY RAM STORAGE (NON-PERSISTENT) ---
