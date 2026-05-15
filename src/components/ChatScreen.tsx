@@ -102,7 +102,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
     const handleReceive = (data: any) => {
       audioService.playMessageReceived();
-      setMessages(prev => [...prev, { id: data.id, text: data.text, isSelf: false, boost: data.boost, reactions: {} }]);
+      setMessages(prev => [...prev, { id: data.id, text: data.text, image: data.image, isSelf: false, boost: data.boost, reactions: {} }]);
       socketService.emit('mark_read', { id: data.id });
     };
 
@@ -330,16 +330,47 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
         setMessages(prev => [...prev, { id: Date.now().toString(), text: "SYS_ERR: INSUFFICIENT_FUNDS for Image Transfer (50pts required)", isSelf: false, system: true }]);
         return;
      }
-     
+
      const reader = new FileReader();
      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
-        onPointsSpent(50, 'Send Encrypted Image');
-        const newMsgId = Date.now().toString();
-        const newMsg = { id: newMsgId, text: '', image: base64, isSelf: true, status: 'sent' as const };
-        audioService.playMessageSent();
-        setMessages(prev => [...prev, newMsg]);
-        socketService.emit('send_message', { roomId, id: newMsgId, text: '', image: base64 });
+        const img = new Image();
+        img.onload = () => {
+           const canvas = document.createElement('canvas');
+           const MAX_WIDTH = 800;
+           const MAX_HEIGHT = 800;
+           let width = img.width;
+           let height = img.height;
+
+           if (width > height) {
+              if (width > MAX_WIDTH) {
+                 height *= MAX_WIDTH / width;
+                 width = MAX_WIDTH;
+              }
+           } else {
+              if (height > MAX_HEIGHT) {
+                 width *= MAX_HEIGHT / height;
+                 height = MAX_HEIGHT;
+              }
+           }
+
+           canvas.width = width;
+           canvas.height = height;
+           const ctx = canvas.getContext('2d');
+           ctx?.drawImage(img, 0, 0, width, height);
+
+           const base64 = canvas.toDataURL('image/jpeg', 0.8);
+           const currentText = input.trim();
+           
+           onPointsSpent(50, 'Send Encrypted Image');
+           const newMsgId = Date.now().toString();
+           const newMsg = { id: newMsgId, text: currentText, image: base64, isSelf: true, status: 'sent' as const };
+           audioService.playMessageSent();
+           setMessages(prev => [...prev, newMsg]);
+           setInput('');
+           if (fileInputRef.current) fileInputRef.current.value = '';
+           socketService.emit('send_message', { roomId, id: newMsgId, text: currentText, image: base64 });
+        };
+        img.src = event.target?.result as string;
      };
      reader.readAsDataURL(file);
   };
@@ -469,53 +500,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       </div>
 
       {/* Identity Store / Actions Sidebar */}
-      <div className="border-b border-[var(--phos-color)]/20 p-2 flex gap-2 sm:gap-4 overflow-x-auto whitespace-nowrap text-[10px] sm:text-xs scrollbar-hide relative z-20 bg-black/20">
-        <span className="phosphor-dim uppercase py-1 hidden lg:inline">Exchange:</span>
-        <button 
-          onClick={() => onPointsSpent(300, 'Age')}
-          className="border border-[var(--phos-color)]/30 px-2 sm:px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex flex-col items-center group whitespace-nowrap"
-          title="Cost: 300 pts"
-        >
-           <div className="flex items-center gap-1">
-             <Eye size={12} className="group-hover:animate-pulse" />
-             <span>Age (300)</span>
-           </div>
-           <span className="font-sans text-[8px] opacity-70">سن</span>
-        </button>
-        <button 
-          onClick={() => onPointsSpent(400, 'Gender')}
-          className="border border-[var(--phos-color)]/30 px-2 sm:px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex flex-col items-center group whitespace-nowrap"
-          title="Cost: 400 pts"
-        >
-           <div className="flex items-center gap-1">
-             <Eye size={12} className="group-hover:animate-pulse" />
-             <span>Gender (400)</span>
-           </div>
-           <span className="font-sans text-[8px] opacity-70">جنسیت</span>
-        </button>
-        <button 
-          onClick={() => onPointsSpent(500, 'City')}
-          className="border border-[var(--phos-color)]/30 px-2 sm:px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex flex-col items-center group whitespace-nowrap"
-          title="Cost: 500 pts"
-        >
-           <div className="flex items-center gap-1">
-             <Navigation size={12} className="group-hover:animate-pulse" />
-             <span>City (500)</span>
-           </div>
-           <span className="font-sans text-[8px] opacity-70">شهر</span>
-        </button>
-        <button 
-          onClick={() => onPointsSpent(600, 'Music')}
-          className="border border-[var(--phos-color)]/30 px-2 sm:px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex flex-col items-center group whitespace-nowrap"
-          title="Cost: 600 pts"
-        >
-           <div className="flex items-center gap-1">
-             <Eye size={12} className="group-hover:animate-pulse" />
-             <span>Music (600)</span>
-           </div>
-           <span className="font-sans text-[8px] opacity-70">موسیقی</span>
-        </button>
-        
+      <div className="border-b border-[var(--phos-color)]/20 p-2 flex gap-2 sm:gap-4 overflow-x-auto whitespace-nowrap text-[10px] sm:text-xs scrollbar-hide relative z-20 bg-black/20 items-center">
         <button 
           onClick={unlockVoice}
           disabled={voiceUnlocked || points < 500}
@@ -572,7 +557,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                "max-w-[85%] sm:max-w-[80%] break-words p-2 sm:p-3 relative group will-change-[opacity]",
                m.system ? "mx-auto text-center border-y border-[var(--phos-color)]/30 text-[10px] sm:text-xs text-[var(--phos-color)] uppercase max-w-full my-3 sm:my-4 phosphor-dim" :
                m.isSelf ? "ml-auto border border-[var(--phos-color)]/50 bg-[var(--phos-color)]/5 text-[var(--phos-color)]" : 
-               "mr-auto border border-white/10 text-white/90",
+               "mr-auto border border-[var(--phos-color)]/20 text-[var(--phos-color)] opacity-90",
                m.boost === 'highlight' ? "shadow-[0_0_15px_var(--phos-color)] border-[var(--phos-color)] phosphor-glow" : "",
                m.boost === 'glitch' ? "fx-jitter" : "",
                m.boost === 'redact' ? "bg-black text-black hover:text-[var(--phos-color)] transition-colors cursor-pointer" : ""

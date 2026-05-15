@@ -282,15 +282,17 @@ async function startServer() {
     socket.on('disconnect', () => {
       queue = queue.filter(u => u.socketId !== sId);
       const user = socketToUser.get(sId);
-      if (user?.currentRoom) terminateChat(user.currentRoom);
       socketToUser.delete(sId);
+      if (user && user.socketId === sId) {
+        if (user.currentRoom) terminateChat(user.currentRoom);
+      }
       syncAtmosphere();
     });
 
     socket.on('leave_pool', () => {
       queue = queue.filter(u => u.socketId !== sId);
       const user = socketToUser.get(sId);
-      if (user?.currentRoom) terminateChat(user.currentRoom);
+      if (user?.currentRoom && user.socketId === sId) terminateChat(user.currentRoom);
     });
 
     socket.on('spend_points', (data) => {
@@ -437,7 +439,7 @@ async function startServer() {
        const room = activeChats.get(user.currentRoom);
        if (!room) return;
 
-       const cost = 400;
+       const cost = 200;
        if (user.points >= cost) {
           user.points -= cost;
           if (!user.isGuest) {
