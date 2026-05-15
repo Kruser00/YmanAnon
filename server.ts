@@ -4,12 +4,33 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
+import Database from 'better-sqlite3';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const db = new Database('phos_sqlite.db');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE,
+    password_hash TEXT,
+    points INTEGER DEFAULT 200,
+    reputation_positive INTEGER DEFAULT 0,
+    reputation_negative INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key_for_dev_only';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  
+  app.use(express.json()); // Add support for JSON bodies
   
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
@@ -19,6 +40,80 @@ async function startServer() {
   // --- IN-MEMORY RAM STORAGE (NON-PERSISTENT) ---
   // When the server restarts, everything is purged.
   
+  // Authentication Endpoints
+  
+  const authenticateToken = (req: any, res: any, next: any) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token == null) return res.sendStatus(401);
+
+    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+      if (err) return res.sendStatus(403);
+      req.user = user;
+      next();
+    });
+  };
+
+  app.post('/api/register', (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password || username.length < 3) return res.status(400).json({ error: 'Invalid username or password' });
+    
+    try {
+      const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+      if (existingUser) return res.status(409).json({ error: 'Username already exists' });
+
+      const hash = bcrypt.hashSync(password, 10);
+      const id = crypto.randomUUID();
+      db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').run(id, username, hash);
+      
+      const token = jwt.sign({ id, username }, JWT_SECRET, { expiresIn: '7d' });
+      res.json({ token, id, username, points: 200, reputation: { positive: 0, negative: 0 } });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+
+    try {
+      const user: any = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+      if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+      if (!bcrypt.compareSync(password, user.password_hash)) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+      res.json({ 
+        token, 
+        id: user.id, 
+        username: user.username, 
+        points: user.points, 
+        reputation: { positive: user.reputation_positive, negative: user.reputation_negative } 
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/me', authenticateToken, (req: any, res: any) => {
+    try {
+      const user: any = db.prepare('SELECT id, username, points, reputation_positive, reputation_negative FROM users WHERE id = ?').get(req.user.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      
+      res.json({ 
+        id: user.id, 
+        username: user.username, 
+        points: user.points, 
+        reputation: { positive: user.reputation_positive, negative: user.reputation_negative } 
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Local Matchmaking State
   let queue: any[] = [];
   let activeChats = new Map<string, any>();
@@ -123,25 +218,46 @@ async function startServer() {
   };
 
   const registerUser = (socketId: string, data: any) => {
-    const nodeId = data.nodeId || `NODE_${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
+    let token = data.token;
+    let userId = data.nodeId || `ANON_${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
+    let isGuest = true;
+    let dbUser: any = null;
+
+    if (token) {
+       try {
+          const decoded: any = jwt.verify(token, JWT_SECRET);
+          userId = decoded.id;
+          isGuest = false;
+          dbUser = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+       } catch (e) {
+          // invalid token
+       }
+    }
+
+    const nodeId = userId;
     
     let user = nodeToUser.get(nodeId);
     if (!user) {
         console.log(`[CORE_SYNC] Initializing identity matrix for node: ${nodeId}`);
         user = {
             nodeId,
-            points: 200, // Reduced for lore/difficulty
-            reputation: { positive: 0, negative: 0 },
+            points: isGuest ? 200 : (dbUser ? dbUser.points : 200),
+            reputation: isGuest ? { positive: 0, negative: 0 } : (dbUser ? { positive: dbUser.reputation_positive, negative: dbUser.reputation_negative } : { positive: 0, negative: 0 }),
             profile: data.profile || {},
             freq: data.freq || null,
             currentRoom: null,
             lastPartnerId: null,
-            lastAdClaimedAt: 0
+            lastAdClaimedAt: 0,
+            isGuest
         };
         nodeToUser.set(nodeId, user);
     } else {
         console.log(`[CORE_SYNC] Node re-linked: ${nodeId} | Balance: ${user.points}`);
-        // Update profile if provided
+        // If they had logged in from elsewhere or reconnect, sync DB points just in case
+        if (!isGuest && dbUser) {
+            user.points = dbUser.points;
+            user.reputation = { positive: dbUser.reputation_positive, negative: dbUser.reputation_negative };
+        }
         if (data.profile) user.profile = { ...user.profile, ...data.profile };
     }
 
@@ -180,6 +296,9 @@ async function startServer() {
        const user = socketToUser.get(sId);
        if (user && user.points >= data.amount) {
            user.points -= data.amount;
+           if (!user.isGuest) {
+               db.prepare('UPDATE users SET points = ? WHERE id = ?').run(user.points, user.nodeId);
+           }
            syncUserState(sId);
        }
     });
@@ -199,6 +318,10 @@ async function startServer() {
           partner.reputation.positive += newPos;
           partner.reputation.negative += newNeg;
           if (newPos > 0) partner.points += Math.floor(Math.random() * 20) + 10;
+          
+          if (!partner.isGuest) {
+             db.prepare('UPDATE users SET points = ?, reputation_positive = ?, reputation_negative = ? WHERE id = ?').run(partner.points, partner.reputation.positive, partner.reputation.negative, partner.nodeId);
+          }
           syncUserState(partner.socketId);
        }
     });
@@ -263,18 +386,28 @@ async function startServer() {
           id: messageId,
           sender: sId,
           text: data.text,
+          image: data.image,
           timestamp: Date.now()
         });
 
         // Confirm delivery to sender
         socket.emit('message_delivered', { id: messageId });
         
+        if (data.image) {
+           setTimeout(() => {
+              io.to(user.currentRoom).emit('message_updated', { messageId, updates: { image: null, text: data.text ? data.text + '\n[ENCRYPTED PAYLOAD DESTRUCTED]' : '[ENCRYPTED PAYLOAD DESTRUCTED]' }});
+           }, 30000);
+        }
+
         const room = activeChats.get(user.currentRoom);
         if (room) {
           room.lastActivityAt = Date.now();
           room.messageCount++;
         }
         user.points += 2;
+        if (!user.isGuest) {
+           db.prepare('UPDATE users SET points = ? WHERE id = ?').run(user.points, user.nodeId);
+        }
         socket.emit('points_updated', { points: user.points, reason: '+2 msg' });
       }
     });
@@ -306,6 +439,9 @@ async function startServer() {
        const cost = 400;
        if (user.points >= cost) {
           user.points -= cost;
+          if (!user.isGuest) {
+             db.prepare('UPDATE users SET points = ? WHERE id = ?').run(user.points, user.nodeId);
+          }
           room.expiresAt += 2 * 60 * 1000;
           syncUserState(sId);
           io.to(user.currentRoom).emit('system_message', { text: `[PROTOCOL_OVERRIDE] > Memory decay delayed by node contribution (+2m)` });
@@ -318,6 +454,34 @@ async function startServer() {
        if (user && user.currentRoom) {
          socket.to(user.currentRoom).emit('partner_typing', { isTyping: data.isTyping });
        }
+    });
+
+    socket.on('webrtc_offer', (data) => {
+      const user = socketToUser.get(sId);
+      if (user && user.currentRoom) {
+        socket.to(user.currentRoom).emit('webrtc_offer', data);
+      }
+    });
+
+    socket.on('webrtc_answer', (data) => {
+      const user = socketToUser.get(sId);
+      if (user && user.currentRoom) {
+        socket.to(user.currentRoom).emit('webrtc_answer', data);
+      }
+    });
+
+    socket.on('webrtc_ice_candidate', (data) => {
+      const user = socketToUser.get(sId);
+      if (user && user.currentRoom) {
+        socket.to(user.currentRoom).emit('webrtc_ice_candidate', data);
+      }
+    });
+
+    socket.on('feature_unlocked', (data) => {
+      const user = socketToUser.get(sId);
+      if (user && user.currentRoom) {
+        socket.to(user.currentRoom).emit('partner_unlocked_feature', data);
+      }
     });
   });
 

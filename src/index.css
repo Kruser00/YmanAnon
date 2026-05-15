@@ -294,3 +294,8 @@ body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+@keyframes shrinkX {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}

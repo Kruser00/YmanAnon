@@ -8,16 +8,16 @@ import {
   BootSequence, 
   ProfileSetupScreen, 
   DashboardScreen, 
-  OracleScreen, 
-  SelectionScreen, 
   MatchingScreen, 
   ChatBootSequence, 
   ChatScreen, 
   ConversationStatsScreen, 
-  RatingScreen
+  RatingScreen,
+  FrequencyTunerScreen,
+  AuthScreen
 } from './components';
 
-type AppState = 'START' | 'BOOT' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'FREQUENCY' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'RATING' | 'CHAT_STATS';
+type AppState = 'START' | 'BOOT' | 'AUTH' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'FREQUENCY' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'RATING' | 'CHAT_STATS';
 type Theme = 'green' | 'amber' | 'ghost';
 
 export default function App() {
@@ -34,8 +34,10 @@ export default function App() {
   const [atmosphere, setAtmosphere] = useState<{ freqs?: Record<string, number>, online: number }>({ freqs: {}, online: 0 });
   const [theme, setTheme] = useState<Theme>('green');
   const [nodeId, setNodeId] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isGlitching, setIsGlitching] = useState(false);
+  const [voidMessages, setVoidMessages] = useState<any[]>([]);
 
   useEffect(() => {
     let savedId = localStorage.getItem('terminal_node_id');
@@ -44,6 +46,13 @@ export default function App() {
       localStorage.setItem('terminal_node_id', savedId);
     }
     setNodeId(savedId);
+
+    const savedToken = localStorage.getItem('phos_token');
+    if (savedToken) {
+      setToken(savedToken);
+      const savedUsername = localStorage.getItem('phos_username');
+      if (savedUsername) setNodeId(savedUsername);
+    }
 
     const savedProfile = localStorage.getItem(`profile_${savedId}`);
     if (savedProfile) {
@@ -111,18 +120,36 @@ export default function App() {
 
   useEffect(() => {
     if (appState === 'DASHBOARD' && nodeId) {
-      socketService.emit('register_node', { nodeId, profile });
+      socketService.emit('register_node', { nodeId, profile, token });
     }
-  }, [appState, nodeId, profile]);
+  }, [appState, nodeId, profile, token]);
 
   const handleJoinPool = (selectedFreq: string) => {
     if (!isMuted) audioService.playKeystroke();
     setFrequency(selectedFreq);
     setAppState('MATCHING');
-    socketService.emit('join_pool', { freq: selectedFreq, profile, nodeId });
+    socketService.emit('join_pool', { freq: selectedFreq, profile, nodeId, token });
   };
 
   const onBootComplete = useCallback(() => {
+    if (token) {
+       // if we have a token, we could assume they are authed. Should check if profile is set.
+       if (profile.name && profile.age && profile.gender) {
+          setAppState('DASHBOARD');
+       } else {
+          setAppState('PROFILE');
+       }
+    } else {
+       setAppState('AUTH');
+    }
+  }, [token, profile]);
+
+  const onAuthComplete = useCallback((newToken?: string) => {
+    if (newToken) {
+       setToken(newToken);
+       const savedUsername = localStorage.getItem('phos_username');
+       if (savedUsername) setNodeId(savedUsername);
+    }
     if (profile.name && profile.age && profile.gender) {
       setAppState('DASHBOARD');
     } else {
@@ -213,6 +240,12 @@ export default function App() {
               {appState === 'BOOT' && (
                 <motion.div key="boot" exit={{ opacity: 0 }} className="h-full">
                   <BootSequence onComplete={onBootComplete} />
+                </motion.div>
+              )}
+
+              {appState === 'AUTH' && (
+                <motion.div key="auth" exit={{ opacity: 0 }} className="h-full">
+                  <AuthScreen onComplete={onAuthComplete} />
                 </motion.div>
               )}
               

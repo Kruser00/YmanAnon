@@ -11,15 +11,34 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { topic: string, roomId: string, points: number, onPointsSpent: (c: number, t: string) => void, nodeId: string | null }) {
-  const [messages, setMessages] = useState<Array<{ id: string, text: string, isSelf: boolean, system?: boolean, boost?: string, reactions?: Record<string, number>, status?: 'sent' | 'delivered' | 'read' }>>([]);
+  const [messages, setMessages] = useState<Array<{ id: string, text: string, image?: string, isSelf: boolean, system?: boolean, boost?: string, reactions?: Record<string, number>, status?: 'sent' | 'delivered' | 'read' }>>([]);
   const [input, setInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState<string | null>(null);
   const [timerExpiresAt, setTimerExpiresAt] = useState<number | null>(null);
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
+  
+  // Voice & Video state
+  const [voiceUnlocked, setVoiceUnlocked] = useState(false);
+  const [videoUnlocked, setVideoUnlocked] = useState(false);
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [isVideoActive, setIsVideoActive] = useState(false);
+  const [partnerVoiceUnlocked, setPartnerVoiceUnlocked] = useState(false);
+  const [partnerVideoUnlocked, setPartnerVideoUnlocked] = useState(false);
+  const [callActive, setCallActive] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<any>(null);
+  
+  const iceCandidateQueue = useRef<any[]>([]);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const typeSoundIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
 
   const emojis = ['🔥', '👍', '❤️', '😂', '😮', '💀'];
 
@@ -109,8 +128,32 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       }
     };
 
+    const handleWebRTCOffer = async (data: any) => {
+      setIncomingCall(data);
+    };
+
+    const handleWebRTCAnswer = async (data: any) => {
+      if (!peerConnectionRef.current) return;
+      await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+      setCallActive(true);
+    };
+
+    const handleWebRTCIceCandidate = async (data: any) => {
+      if (!peerConnectionRef.current || !peerConnectionRef.current.remoteDescription) {
+         iceCandidateQueue.current.push(data.candidate);
+         return;
+      }
+      await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+    };
+
+    const handleFeatureUnlocked = (data: any) => {
+      if (data.feature === 'voice') setPartnerVoiceUnlocked(true);
+      if (data.feature === 'video') setPartnerVideoUnlocked(true);
+      setMessages(prev => [...prev, { id: Date.now().toString(), text: `PARTNER UNLOCKED ${data.feature.toUpperCase()}. / هم‌صحبت شما ویژگی ${data.feature} را فعال کرد.`, isSelf: false, system: true }]);
+    };
+
     const handleMessageUpdate = (data: any) => {
-       setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, boost: data.boost } : m));
+       setMessages(prev => prev.map(m => m.id === data.messageId ? { ...m, boost: data.boost, ...data.updates } : m));
     };
 
     const handleReceiveReaction = (data: any) => {
@@ -132,6 +175,10 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     socketService.on('partner_typing', handlePartnerTyping);
     socketService.on('message_updated', handleMessageUpdate);
     socketService.on('receive_reaction', handleReceiveReaction);
+    socketService.on('webrtc_offer', handleWebRTCOffer);
+    socketService.on('webrtc_answer', handleWebRTCAnswer);
+    socketService.on('webrtc_ice_candidate', handleWebRTCIceCandidate);
+    socketService.on('partner_unlocked_feature', handleFeatureUnlocked);
 
     return () => {
       socketService.off('receive_message', handleReceive);
@@ -142,6 +189,10 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       socketService.off('partner_typing', handlePartnerTyping);
       socketService.off('message_updated', handleMessageUpdate);
       socketService.off('receive_reaction', handleReceiveReaction);
+      socketService.off('webrtc_offer', handleWebRTCOffer);
+      socketService.off('webrtc_answer', handleWebRTCAnswer);
+      socketService.off('webrtc_ice_candidate', handleWebRTCIceCandidate);
+      socketService.off('partner_unlocked_feature', handleFeatureUnlocked);
     };
   }, [topic, roomId]);
 
@@ -152,6 +203,142 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const handleBoost = (messageId: string, type: string) => {
     audioService.playAlert();
     socketService.emit('boost_message', { roomId, messageId, type, nodeId });
+  };
+
+  const initWebRTC = async (withVideo: boolean) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
+      localStreamRef.current = stream;
+      if (localVideoRef.current && withVideo) {
+         localVideoRef.current.srcObject = stream;
+      }
+      
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+      peerConnectionRef.current = peerConnection;
+
+      stream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, stream);
+      });
+
+      peerConnection.ontrack = (event) => {
+        if (remoteVideoRef.current) {
+           remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          socketService.emit('webrtc_ice_candidate', { candidate: event.candidate });
+        }
+      };
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      socketService.emit('webrtc_offer', { offer, withVideo });
+      setCallActive(true);
+      if (withVideo) setIsVideoActive(true);
+      else setIsVoiceActive(true);
+
+    } catch (err) {
+       console.error("WebRTC Error:", err);
+       setMessages(prev => [...prev, { id: Date.now().toString(), text: "SYS_ERR: Could not access media devices.", isSelf: false, system: true }]);
+    }
+  };
+
+  const acceptCall = async () => {
+     if (!incomingCall) return;
+     const withVideo = incomingCall.withVideo;
+     try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
+        localStreamRef.current = stream;
+        if (localVideoRef.current && withVideo) {
+           localVideoRef.current.srcObject = stream;
+        }
+
+        const peerConnection = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        peerConnectionRef.current = peerConnection;
+
+        stream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, stream);
+        });
+
+        peerConnection.ontrack = (event) => {
+          if (remoteVideoRef.current) {
+             remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        };
+
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            socketService.emit('webrtc_ice_candidate', { candidate: event.candidate });
+          }
+        };
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socketService.emit('webrtc_answer', { answer });
+
+        iceCandidateQueue.current.forEach(async (candidate) => {
+           await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+        iceCandidateQueue.current = [];
+
+        setCallActive(true);
+        setIncomingCall(null);
+        if (withVideo) setIsVideoActive(true);
+        else setIsVoiceActive(true);
+     } catch (err) {
+        console.error("WebRTC Error:", err);
+        setMessages(prev => [...prev, { id: Date.now().toString(), text: "SYS_ERR: Could not access media devices.", isSelf: false, system: true }]);
+     }
+  };
+
+  const unlockVoice = () => {
+    if (points < 500) return;
+    onPointsSpent(500, 'Unlock Voice Channel');
+    setVoiceUnlocked(true);
+    socketService.emit('unlock_feature', { feature: 'voice' });
+  };
+
+  const unlockVideo = () => {
+    if (points < 1000) return;
+    onPointsSpent(1000, 'Unlock Video Channel');
+    setVideoUnlocked(true);
+    socketService.emit('unlock_feature', { feature: 'video' });
+  };
+
+  const startVoiceCall = () => {
+    initWebRTC(false);
+  };
+
+  const startVideoCall = () => {
+    initWebRTC(true);
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+     const file = e.target.files?.[0];
+     if (!file) return;
+     if (points < 50) {
+        setMessages(prev => [...prev, { id: Date.now().toString(), text: "SYS_ERR: INSUFFICIENT_FUNDS for Image Transfer (50pts required)", isSelf: false, system: true }]);
+        return;
+     }
+     
+     const reader = new FileReader();
+     reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        onPointsSpent(50, 'Send Encrypted Image');
+        const newMsgId = Date.now().toString();
+        const newMsg = { id: newMsgId, text: '', image: base64, isSelf: true, status: 'sent' as const };
+        audioService.playMessageSent();
+        setMessages(prev => [...prev, newMsg]);
+        socketService.emit('send_message', { roomId, id: newMsgId, text: '', image: base64 });
+     };
+     reader.readAsDataURL(file);
   };
 
   const handleReaction = (messageId: string, emoji: string) => {
@@ -322,6 +509,29 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
         </button>
         
         <button 
+          onClick={unlockVoice}
+          disabled={voiceUnlocked || points < 500}
+          className="border border-[var(--phos-color)]/30 px-2 sm:px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex flex-col items-center group whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Cost: 500 pts"
+        >
+           <div className="flex items-center gap-1">
+             <span>Voice (500)</span>
+           </div>
+           <span className="font-sans text-[8px] opacity-70">صدا</span>
+        </button>
+        <button 
+          onClick={unlockVideo}
+          disabled={videoUnlocked || points < 1000}
+          className="border border-[var(--phos-color)]/30 px-2 sm:px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex flex-col items-center group whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Cost: 1000 pts"
+        >
+           <div className="flex items-center gap-1">
+             <span>Video (1000)</span>
+           </div>
+           <span className="font-sans text-[8px] opacity-70">تصویر</span>
+        </button>
+        
+        <button 
           onClick={() => {
              audioService.playKeystroke();
              socketService.emit('trigger_activity', {});
@@ -363,6 +573,15 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             dir="auto"
           >
             {m.system && <span className="mr-2">***</span>}
+            {m.image && (
+               <div className="mb-3 relative inline-block">
+                 <img src={m.image} alt="Encrypted transmission" className="max-w-full max-h-48 object-contain border border-[var(--phos-color)]/30 opacity-80 mix-blend-screen grayscale contrast-150" />
+                 <div className="absolute top-0 left-0 right-0 bg-black/60 text-[8px] sm:text-[10px] text-red-500 p-1 text-center font-mono animate-pulse uppercase tracking-widest border-b border-red-500/50">
+                   Self-Destruct Imminent [30s]
+                 </div>
+                 <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-500 origin-left" style={{ animation: 'shrinkX 30s linear forwards' }} />
+               </div>
+            )}
             <span className={cn(
               "font-sans", 
               m.system ? "font-mono" : "text-[13px] sm:text-base leading-relaxed",
@@ -454,6 +673,69 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
              </div>
           </motion.div>
         )}
+        
+        {/* WebRTC Overlays */}
+        {(isVoiceActive || callActive) && (
+          <div className="border border-[var(--phos-color)] bg-black/80 my-4 p-2 relative flex flex-wrap gap-4 justify-center items-center">
+             <div className="absolute top-1 left-2 text-[8px] uppercase tracking-widest text-[var(--phos-color)]/50">SECURE_AV_CHANNEL</div>
+             {isVideoActive ? (
+                <>
+                  <video ref={localVideoRef} autoPlay muted playsInline className="h-24 w-auto border border-[var(--phos-color)]/50 grayscale contrast-125 object-cover" />
+                  <video ref={remoteVideoRef} autoPlay playsInline className="h-32 w-auto border border-[var(--phos-color)] grayscale contrast-125 object-cover" />
+                </>
+             ) : (
+                <div className="h-16 flex items-center justify-center font-mono text-sm uppercase px-8">
+                   [ Voice Stream Active ]
+                   <audio ref={remoteVideoRef as any} autoPlay />
+                </div>
+             )}
+          </div>
+        )}
+
+        {/* Start Call UI if unlocked */}
+        {!callActive && voiceUnlocked && partnerVoiceUnlocked && (
+           <div className="flex justify-center p-2 mb-2">
+              <button 
+                onClick={startVoiceCall}
+                className="border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-1 text-[10px] uppercase tracking-widest hover:bg-[var(--phos-color)]/30 font-mono"
+              >
+                 START_VOICE_LINK
+              </button>
+           </div>
+        )}
+        
+        {!callActive && videoUnlocked && partnerVideoUnlocked && (
+           <div className="flex justify-center p-2 mb-2">
+              <button 
+                onClick={startVideoCall}
+                className="border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-1 text-[10px] uppercase tracking-widest hover:bg-[var(--phos-color)]/30 font-mono"
+              >
+                 START_VIDEO_LINK
+              </button>
+           </div>
+        )}
+
+        {incomingCall && !callActive && (
+           <div className="border border-[var(--phos-color)] bg-black/90 p-4 m-4 flex flex-col items-center justify-center gap-4 text-[var(--phos-color)] shadow-[0_0_15px_var(--phos-color)] relative z-50">
+              <div className="font-mono text-sm uppercase tracking-widest animate-pulse">
+                 Incoming {incomingCall.withVideo ? 'Video' : 'Voice'} Transmission...
+              </div>
+              <div className="flex gap-4">
+                 <button 
+                   onClick={acceptCall}
+                   className="border border-[var(--phos-color)] px-4 py-2 hover:bg-[var(--phos-color)]/20 font-mono text-xs uppercase transition-colors"
+                 >
+                   Accept
+                 </button>
+                 <button 
+                   onClick={() => setIncomingCall(null)}
+                   className="border border-red-500/50 text-red-500/80 px-4 py-2 hover:bg-red-500/20 font-mono text-xs uppercase transition-colors"
+                 >
+                   Reject
+                 </button>
+              </div>
+           </div>
+        )}
 
         <div ref={bottomRef} />
       </div>
@@ -466,7 +748,28 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       )}
 
       {/* Input Base */}
-      <form onSubmit={sendMessage} className="border-t border-[var(--phos-color)]/30 p-1 sm:p-2 flex bg-black/60 relative z-20">
+      <form onSubmit={sendMessage} className="border-t border-[var(--phos-color)]/30 p-1 sm:p-2 flex bg-black/60 relative z-20 items-center">
+        <label className="cursor-pointer pl-2 pr-1 opacity-80 hover:opacity-100 transition-opacity flex items-center justify-center group relative overflow-visible flex-shrink-0">
+          <input 
+            type="file" 
+            accept="image/*" 
+            onChange={handleImageSelect}
+            className="hidden" 
+            ref={fileInputRef}
+          />
+          <div className="flex items-center justify-center border border-[var(--phos-color)] text-[var(--phos-color)] bg-[var(--phos-color)]/10 group-hover:bg-[var(--phos-color)] px-2 py-1 gap-1 transition-all">
+             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:text-black">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+             </svg>
+             <span className="font-mono text-[10px] group-hover:text-black uppercase tracking-wider font-bold">50 PTS</span>
+          </div>
+          <div className="absolute bottom-10 left-0 hidden group-hover:block whitespace-nowrap bg-black text-[9px] text-[var(--phos-color)] border border-[var(--phos-color)] p-1 z-50">
+             Send self-destructing image
+          </div>
+        </label>
+        
         <div className="flex items-center phosphor-dim px-2 sm:px-3">
           <span className="animate-pulse">{'>'}</span>
         </div>
@@ -474,7 +777,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
           type="text" 
           value={input}
           onChange={handleInputChange}
-          className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base py-2 px-1 focus:ring-0"
+          className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base py-2 px-1 focus:ring-0 min-w-0"
           placeholder="Message... (type / for cmds)"
           autoFocus /* eslint-disable-line jsx-a11y/no-autofocus */
           autoComplete="off"
