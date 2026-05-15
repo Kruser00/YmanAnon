@@ -24,6 +24,12 @@
     --phos-dim: #3a1c00;
   }
 
+  :root[data-theme="ghost"] {
+    --bg-color: #f8fafc;
+    --phos-color: #0f172a;
+    --phos-dim: #94a3b8;
+  }
+
   /* Responsive Scaling */
   @media (max-width: 640px) {
     .text-yellow-400 {

@@ -2,19 +2,20 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { audioService } from '../audio';
 
-export function ProfileSetupScreen({ onComplete }: { onComplete: (p: any) => void }) {
-  const [age, setAge] = useState('');
-  const [gender, setGender] = useState('');
-  const [city, setCity] = useState('');
-  const [music, setMusic] = useState('');
-  const [hobby, setHobby] = useState('');
-  const [mbti, setMbti] = useState('');
+export function ProfileSetupScreen({ initialProfile, onComplete }: { initialProfile?: any, onComplete: (p: any) => void }) {
+  const [name, setName] = useState(initialProfile?.name || '');
+  const [age, setAge] = useState(initialProfile?.age || '');
+  const [gender, setGender] = useState(initialProfile?.gender || '');
+  const [city, setCity] = useState(initialProfile?.city || '');
+  const [music, setMusic] = useState(initialProfile?.music || '');
+  const [hobby, setHobby] = useState(initialProfile?.hobby || '');
+  const [mbti, setMbti] = useState(initialProfile?.mbti || '');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (age && gender && city && music && hobby && mbti) {
+    if (name && age && gender && city && music && hobby && mbti) {
        audioService.playKeystroke();
-       onComplete({ age, gender, city, music, hobby, mbti });
+       onComplete({ name, age, gender, city, music, hobby, mbti });
     }
   };
 
@@ -32,6 +33,13 @@ export function ProfileSetupScreen({ onComplete }: { onComplete: (p: any) => voi
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4 flex flex-col overflow-y-auto px-4 pb-4 scrollbar-hide">
+        <div className="flex flex-col gap-1">
+           <label className="phosphor-dim uppercase text-[10px] sm:text-xs flex justify-between items-center">
+             <span>&gt; Alias / Name</span>
+             <span className="font-sans">نام مستعار</span>
+           </label>
+           <input required autoFocus type="text" placeholder="e.g. Neo" value={name} onChange={(e) => { audioService.playKeystroke(); setName(e.target.value) }} className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors font-sans text-right sm:text-left" dir="auto" />
+        </div>
         <div className="flex flex-col gap-1">
            <label className="phosphor-dim uppercase text-[10px] sm:text-xs flex justify-between items-center">
              <span>&gt; Age Range</span>
@@ -75,7 +83,7 @@ export function ProfileSetupScreen({ onComplete }: { onComplete: (p: any) => voi
            <input required type="text" placeholder="e.g. INTP" value={mbti} onChange={(e) => { audioService.playKeystroke(); setMbti(e.target.value) }} className="bg-transparent border-b border-[var(--phos-color)]/30 p-2 text-[var(--phos-color)] focus:outline-none focus:border-[var(--phos-color)] transition-colors font-sans text-right sm:text-left" dir="auto" />
         </div>
         
-        <button type="submit" disabled={!age || !gender || !city || !music || !hobby || !mbti} className="mt-8 relative border border-[var(--phos-color)] bg-[var(--phos-color)]/5 flex-shrink-0 p-3 pb-4 uppercase tracking-widest hover:bg-[var(--phos-color)]/20 disabled:opacity-30 disabled:hover:bg-transparent transition-colors fx-border-shine overflow-hidden group">
+        <button type="submit" disabled={!name || !age || !gender || !city || !music || !hobby || !mbti} className="mt-8 relative border border-[var(--phos-color)] bg-[var(--phos-color)]/5 flex-shrink-0 p-3 pb-4 uppercase tracking-widest hover:bg-[var(--phos-color)]/20 disabled:opacity-30 disabled:hover:bg-transparent transition-colors fx-border-shine overflow-hidden group">
           <span className="relative z-10 group-hover:fx-holo transition-all duration-300 block mb-1">Initialize Profile</span>
           <span className="relative z-10 font-sans text-sm opacity-80 group-hover:fx-holo">راه‌اندازی پروفایل</span>
         </button>

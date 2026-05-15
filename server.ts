@@ -34,24 +34,20 @@ async function startServer() {
     }
   }, 1000);
   
-  const getActualMoods = () => {
-    const moods = { lonely: 0, curious: 0, bored: 0, anxious: 0, thoughtful: 0, energetic: 0, happy: 0 };
+  const getActualFreqs = () => {
+    const freqs: Record<string, number> = { '88.0': 0, '90.2': 0, '101.5': 0, '104.4': 0, '108.0': 0 };
     let hasData = false;
     for (const user of socketToUser.values()) {
-      if (user.mood && moods[user.mood as keyof typeof moods] !== undefined) {
-        moods[user.mood as keyof typeof moods]++;
+      if (user.freq && freqs[user.freq] !== undefined) {
+        freqs[user.freq]++;
         hasData = true;
       }
     }
-    if (!hasData) {
-      // Return actual 0 counts if no data
-      return moods;
-    }
-    return moods;
+    return freqs;
   };
 
   const syncAtmosphere = () => {
-    io.emit('atmosphere_updated', { moods: getActualMoods(), online: io.engine.clientsCount, activeChats: activeChats.size });
+    io.emit('atmosphere_updated', { freqs: getActualFreqs(), online: io.engine.clientsCount, activeChats: activeChats.size });
   };
 
   const DEEP_PROMPTS = [
@@ -72,8 +68,15 @@ async function startServer() {
   ];
 
   // Helper matching logic
-  const findMatch = (userId: string) => {
-    const matchIndex = queue.findIndex(u => u.socketId !== userId);
+  const findMatch = (userId: string, freq: string) => {
+    // Exact match on freq
+    let matchIndex = queue.findIndex(u => u.socketId !== userId && u.freq === freq);
+    
+    // Ultimate Fallback: match any
+    if (matchIndex === -1) {
+       matchIndex = queue.findIndex(u => u.socketId !== userId);
+    }
+
     if (matchIndex > -1) {
       const partner = queue[matchIndex];
       queue.splice(matchIndex, 1);
@@ -130,8 +133,7 @@ async function startServer() {
             points: 200, // Reduced for lore/difficulty
             reputation: { positive: 0, negative: 0 },
             profile: data.profile || {},
-            mood: data.mood || null,
-            intent: data.intent || null,
+            freq: data.freq || null,
             currentRoom: null,
             lastPartnerId: null,
             lastAdClaimedAt: 0
@@ -202,19 +204,18 @@ async function startServer() {
     });
 
     socket.on('request_atmosphere', () => {
-       socket.emit('atmosphere_data', { moods: getActualMoods(), online: io.engine.clientsCount, activeChats: activeChats.size }); 
+       socket.emit('atmosphere_data', { freqs: getActualFreqs(), online: io.engine.clientsCount, activeChats: activeChats.size }); 
     });
 
     socket.on('join_pool', (data) => {
       const userData = registerUser(sId, data);
-      userData.mood = data.mood;
-      userData.intent = data.intent;
+      userData.freq = data.freq;
 
       syncUserState(sId);
 
       syncAtmosphere();
       
-      const partner = findMatch(sId);
+      const partner = findMatch(sId, data.freq);
       if (partner) {
         const roomId = `room_${sId}_${partner.socketId}`;
         socket.join(roomId);
@@ -222,7 +223,7 @@ async function startServer() {
         
         activeChats.set(roomId, { 
            users: [sId, partner.socketId],
-           topic: data.intent === partner.intent ? data.intent : 'Life choices',
+           topic: `FREQUENCY ${data.freq}`,
            createdAt: Date.now(),
            expiresAt: Date.now() + 5 * 60 * 1000, // 5 minute chat timer
            lastActivityAt: Date.now(),
@@ -246,19 +247,6 @@ async function startServer() {
       }
     });
 
-    socket.on('broadcast_void', (data) => {
-       if (data.text && typeof data.text === 'string' && data.text.trim().length > 0) {
-           io.emit('void_broadcast', { text: data.text.slice(0, 100).trim(), timestamp: Date.now() });
-       }
-    });
-
-    socket.on('send_void_message', (data) => {
-      const user = socketToUser.get(sId);
-      if (user && data.text) {
-        io.emit('void_broadcast', { text: data.text, timestamp: Date.now(), nodeId: user.nodeId });
-      }
-    });
-
     socket.on('send_message', (data) => {
       const user = socketToUser.get(sId);
       if (user && user.currentRoom) {
@@ -269,12 +257,17 @@ async function startServer() {
            return;
         }
 
+        const messageId = data.id || Date.now().toString();
+
         socket.to(user.currentRoom).emit('receive_message', {
-          id: Date.now().toString(),
+          id: messageId,
           sender: sId,
           text: data.text,
           timestamp: Date.now()
         });
+
+        // Confirm delivery to sender
+        socket.emit('message_delivered', { id: messageId });
         
         const room = activeChats.get(user.currentRoom);
         if (room) {
@@ -284,6 +277,13 @@ async function startServer() {
         user.points += 2;
         socket.emit('points_updated', { points: user.points, reason: '+2 msg' });
       }
+    });
+
+    socket.on('mark_read', (data) => {
+       const user = socketToUser.get(sId);
+       if (user && user.currentRoom) {
+          socket.to(user.currentRoom).emit('message_read', { id: data.id });
+       }
     });
 
     socket.on('send_reaction', (data) => {

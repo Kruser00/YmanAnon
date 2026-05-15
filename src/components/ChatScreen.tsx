@@ -11,7 +11,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { topic: string, roomId: string, points: number, onPointsSpent: (c: number, t: string) => void, nodeId: string | null }) {
-  const [messages, setMessages] = useState<Array<{ id: string, text: string, isSelf: boolean, system?: boolean, boost?: string, reactions?: Record<string, number> }>>([]);
+  const [messages, setMessages] = useState<Array<{ id: string, text: string, isSelf: boolean, system?: boolean, boost?: string, reactions?: Record<string, number>, status?: 'sent' | 'delivered' | 'read' }>>([]);
   const [input, setInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState<string | null>(null);
   const [timerExpiresAt, setTimerExpiresAt] = useState<number | null>(null);
@@ -19,8 +19,24 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const [partnerTyping, setPartnerTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typeSoundIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const emojis = ['🔥', '👍', '❤️', '😂', '😮', '💀'];
+
+  useEffect(() => {
+     if (partnerTyping) {
+        if (typeSoundIntervalRef.current) clearInterval(typeSoundIntervalRef.current);
+        typeSoundIntervalRef.current = setInterval(() => {
+           audioService.playTypingTic();
+        }, 150); // Simulate random typings with interval
+     } else {
+        if (typeSoundIntervalRef.current) clearInterval(typeSoundIntervalRef.current);
+     }
+     
+     return () => {
+         if (typeSoundIntervalRef.current) clearInterval(typeSoundIntervalRef.current);
+     }
+  }, [partnerTyping]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -63,10 +79,19 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     }]);
 
     const handleReceive = (data: any) => {
-      audioService.playKeystroke();
+      audioService.playMessageReceived();
       setMessages(prev => [...prev, { id: data.id, text: data.text, isSelf: false, boost: data.boost, reactions: {} }]);
+      socketService.emit('mark_read', { id: data.id });
     };
-    
+
+    const handleMessageDelivered = (data: any) => {
+       setMessages(prev => prev.map(m => m.id === data.id ? { ...m, status: 'delivered' } : m));
+    };
+
+    const handleMessageRead = (data: any) => {
+       setMessages(prev => prev.map(m => m.id === data.id ? { ...m, status: 'read' } : m));
+    };
+
     const handleSystem = (data: any) => {
       audioService.playAlert();
       setMessages(prev => [...prev, { id: Date.now().toString(), text: data.text, isSelf: false, system: true }]);
@@ -100,6 +125,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     };
 
     socketService.on('receive_message', handleReceive);
+    socketService.on('message_delivered', handleMessageDelivered);
+    socketService.on('message_read', handleMessageRead);
     socketService.on('system_message', handleSystem);
     socketService.on('partner_disconnected', handlePartnerDisconnect);
     socketService.on('partner_typing', handlePartnerTyping);
@@ -108,6 +135,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
     return () => {
       socketService.off('receive_message', handleReceive);
+      socketService.off('message_delivered', handleMessageDelivered);
+      socketService.off('message_read', handleMessageRead);
       socketService.off('system_message', handleSystem);
       socketService.off('partner_disconnected', handlePartnerDisconnect);
       socketService.off('partner_typing', handlePartnerTyping);
@@ -157,9 +186,34 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     e.preventDefault();
     if (!input.trim()) return;
     
-    audioService.playKeystroke();
     socketService.emit('typing', { isTyping: false });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    if (input.startsWith('/') && !input.startsWith('/accept ') && !input.startsWith('/decline ')) {
+       const cmd = input.split(' ')[0];
+       
+       if (cmd === '/ping') {
+          const msg = { id: `sys-loc-${Date.now()}`, text: `PONG: ${Math.floor(Math.random() * 50) + 10}ms`, isSelf: false, system: true };
+          setMessages(prev => [...prev, msg]);
+       } else if (cmd === '/clear') {
+          setMessages([]);
+       } else if (cmd === '/whoami') {
+          const sysId = localStorage.getItem('terminal_node_id') || 'UNKNOWN';
+          const msg = { id: `sys-loc-${Date.now()}`, text: `NODE_ID: ${sysId}`, isSelf: false, system: true };
+          setMessages(prev => [...prev, msg]);
+       } else if (cmd === '/roll') {
+          const roll = Math.floor(Math.random() * 100) + 1;
+          socketService.emit('send_message', { roomId, text: `[SYSTEM] Rolled: ${roll}` });
+       } else if (cmd === '/help') {
+          const msg = { id: `sys-loc-${Date.now()}`, text: `COMMANDS: /ping, /clear, /whoami, /roll, /help`, isSelf: false, system: true };
+          setMessages(prev => [...prev, msg]);
+       } else {
+          const msg = { id: `sys-loc-${Date.now()}`, text: `SYS_ERR: Unknown command '${cmd}'`, isSelf: false, system: true };
+          setMessages(prev => [...prev, msg]);
+       }
+       setInput('');
+       return;
+    }
 
     if (input.startsWith('/accept ')) {
        const type = input.split(' ')[1];
@@ -170,9 +224,11 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
        }
     }
 
-    const newMsg = { id: Date.now().toString(), text: input, isSelf: true };
+    const newMsgId = Date.now().toString();
+    const newMsg = { id: newMsgId, text: input, isSelf: true, status: 'sent' as const };
+    audioService.playMessageSent();
     setMessages(prev => [...prev, newMsg]);
-    socketService.emit('send_message', { roomId, text: input });
+    socketService.emit('send_message', { roomId, id: newMsgId, text: input });
     setInput('');
   };
 
@@ -284,13 +340,18 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 relative z-10 backdrop-blur-[1px] scrollbar-hide pb-10">
-        {messages.map((m) => (
+        {messages.map((m, i) => {
+          const reversedIndex = messages.length - 1 - i;
+          // Fading terminal effect: older messages fade out
+          const msgOpacity = Math.max(0.2, 1 - Math.max(0, reversedIndex - 4) * 0.15);
+          
+          return (
           <motion.div
             key={m.id}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className={cn(
-               "max-w-[85%] sm:max-w-[80%] break-words p-2 sm:p-3 relative group",
+               "max-w-[85%] sm:max-w-[80%] break-words p-2 sm:p-3 relative group will-change-[opacity]",
                m.system ? "mx-auto text-center border-y border-[var(--phos-color)]/30 text-[10px] sm:text-xs text-[var(--phos-color)] uppercase max-w-full my-3 sm:my-4 phosphor-dim" :
                m.isSelf ? "ml-auto border border-[var(--phos-color)]/50 bg-[var(--phos-color)]/5 text-[var(--phos-color)]" : 
                "mr-auto border border-white/10 text-white/90",
@@ -298,6 +359,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                m.boost === 'glitch' ? "fx-jitter" : "",
                m.boost === 'redact' ? "bg-black text-black hover:text-[var(--phos-color)] transition-colors cursor-pointer" : ""
             )}
+            style={{ opacity: msgOpacity }}
             dir="auto"
           >
             {m.system && <span className="mr-2">***</span>}
@@ -309,6 +371,15 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
               {m.text}
             </span>
             {m.system && <span className="ml-2">***</span>}
+
+            {/* Status Indicator */}
+            {m.isSelf && !m.system && (
+               <div className="absolute -bottom-4 right-1 text-[8px] font-mono opacity-50 uppercase tracking-tighter">
+                 {m.status === 'sent' && 'SENT'}
+                 {m.status === 'delivered' && 'DLVRD'}
+                 {m.status === 'read' && <span className="text-[var(--phos-color)] font-bold">READ</span>}
+               </div>
+            )}
 
             {/* Reactions Display */}
             {m.reactions && Object.keys(m.reactions).length > 0 && (
@@ -365,7 +436,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
               </div>
             )}
           </motion.div>
-        ))}
+          );
+        })}
 
         {partnerTyping && (
           <motion.div 
@@ -374,7 +446,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             exit={{ opacity: 0 }}
             className="text-[9px] sm:text-xs font-mono text-[var(--phos-color)]/50 uppercase ml-4 animate-pulse flex items-center gap-2"
           >
-             <span>SIGNAL_DETECTED</span>
+             <span>INCOMING_TRANSMISSION</span>
              <div className="flex gap-1">
                <span className="w-1 h-1 bg-[var(--phos-color)]/50 animate-bounce" style={{ animationDelay: '0ms' }} />
                <span className="w-1 h-1 bg-[var(--phos-color)]/50 animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -386,6 +458,13 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
         <div ref={bottomRef} />
       </div>
 
+      {input.startsWith('/') && (
+         <div className="px-4 py-2 text-[10px] sm:text-xs text-[var(--phos-color)]/70 font-mono italic flex items-center justify-between border-t border-[var(--phos-color)]/20 bg-black/40">
+            <span>COMMAND RECOGNIZED</span>
+            <span className="opacity-50 text-[8px] sm:text-[9px]">Try: /help, /ping, /roll, /whoami, /clear</span>
+         </div>
+      )}
+
       {/* Input Base */}
       <form onSubmit={sendMessage} className="border-t border-[var(--phos-color)]/30 p-1 sm:p-2 flex bg-black/60 relative z-20">
         <div className="flex items-center phosphor-dim px-2 sm:px-3">
@@ -396,11 +475,19 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
           value={input}
           onChange={handleInputChange}
           className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base py-2 px-1 focus:ring-0"
-          placeholder="Message... / پیام..."
+          placeholder="Message... (type / for cmds)"
           autoFocus /* eslint-disable-line jsx-a11y/no-autofocus */
           autoComplete="off"
           dir="auto"
         />
+        <button 
+          type="button" 
+          className="text-[9px] border border-[var(--phos-color)]/30 px-1.5 py-0.5 rounded hover:bg-[var(--phos-color)]/10 mr-2 self-center font-mono"
+          title="Terminal Commands: /help, /ping, /roll, /whoami, /clear"
+          onClick={() => setInput('/help')}
+        >
+          /CMD
+        </button>
         <button type="submit" disabled={!input.trim()} className="px-2 sm:px-4 text-[var(--phos-color)] flex flex-col items-center phosphor-dim hover:text-white hover:phosphor-glow disabled:opacity-30 uppercase text-[10px] sm:text-xs font-bold pt-1">
           <span>Send</span>
           <span className="font-sans text-[9px] lowercase opacity-70">ارسال</span>

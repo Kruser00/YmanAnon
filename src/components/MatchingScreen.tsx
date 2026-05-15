@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { Heart } from 'lucide-react';
 import { audioService } from '../audio';
 
-export function MatchingScreen({ onCancel }: { onCancel?: () => void }) {
+export function MatchingScreen({ onCancel, frequency }: { onCancel?: () => void; frequency?: number }) {
   return (
     <motion.div 
       initial={{ opacity: 0 }}
@@ -23,7 +23,10 @@ export function MatchingScreen({ onCancel }: { onCancel?: () => void }) {
       <div className="flex flex-col gap-2">
         <span className="fx-holo font-bold !text-white text-lg uppercase tracking-wider">Searching matching pool</span>
         <span className="font-sans text-lg phosphor-glow">در حال جستجوی شبکه...</span>
-        <span className="phosphor-dim text-sm uppercase tracking-tighter">Aligning intent frequencies / هم‌ترازی فرکانس‌ها</span>
+        <span className="phosphor-dim text-sm uppercase tracking-tighter">Aligning frequencies / هم‌ترازی فرکانس‌ها</span>
+        {frequency && (
+           <span className="font-mono text-[10px] mt-2 text-[var(--phos-color)]">TUNED TO: {frequency.toFixed(2)} MHz</span>
+        )}
       </div>
     </motion.div>
   );

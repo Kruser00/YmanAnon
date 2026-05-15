@@ -17,21 +17,21 @@ import {
   RatingScreen
 } from './components';
 
-type AppState = 'START' | 'BOOT' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'RATING' | 'CHAT_STATS';
-type Theme = 'green' | 'amber';
+type AppState = 'START' | 'BOOT' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'FREQUENCY' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'RATING' | 'CHAT_STATS';
+type Theme = 'green' | 'amber' | 'ghost';
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>('START');
-  const [profile, setProfile] = useState<{ age: string, gender: string, city: string, music: string, hobby: string, mbti: string }>({ age: '', gender: '', city: '', music: '', hobby: '', mbti: ''});
+  const [profile, setProfile] = useState<{ name: string, age: string, gender: string, city: string, music: string, hobby: string, mbti: string }>({ name: '', age: '', gender: '', city: '', music: '', hobby: '', mbti: ''});
   const [mood, setMood] = useState<string | null>(null);
   const [intent, setIntent] = useState<string | null>(null);
+  const [frequency, setFrequency] = useState<string | null>('88.0');
   const [points, setPoints] = useState<number>(0);
   const [reputation, setReputation] = useState<{ positive: number, negative: number }>({ positive: 0, negative: 0 });
   const [roomId, setRoomId] = useState<string | null>(null);
   const [topic, setTopic] = useState<string | null>(null);
   const [chatStats, setChatStats] = useState<{ duration: number, rank: string, messageCount: number } | null>(null);
-  const [voidMessages, setVoidMessages] = useState<Array<{ text: string, timestamp: number }>>([]);
-  const [atmosphere, setAtmosphere] = useState<{ moods: Record<string, number>, online: number }>({ moods: {}, online: 0 });
+  const [atmosphere, setAtmosphere] = useState<{ freqs?: Record<string, number>, online: number }>({ freqs: {}, online: 0 });
   const [theme, setTheme] = useState<Theme>('green');
   const [nodeId, setNodeId] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -44,6 +44,13 @@ export default function App() {
       localStorage.setItem('terminal_node_id', savedId);
     }
     setNodeId(savedId);
+
+    const savedProfile = localStorage.getItem(`profile_${savedId}`);
+    if (savedProfile) {
+      try {
+        setProfile(JSON.parse(savedProfile));
+      } catch (e) {}
+    }
   }, []);
 
   useEffect(() => {
@@ -108,19 +115,27 @@ export default function App() {
     }
   }, [appState, nodeId, profile]);
 
-  const handleJoinPool = (selectedIntent: string) => {
+  const handleJoinPool = (selectedFreq: string) => {
     if (!isMuted) audioService.playKeystroke();
-    setIntent(selectedIntent);
+    setFrequency(selectedFreq);
     setAppState('MATCHING');
-    socketService.emit('join_pool', { mood, intent: selectedIntent, profile, nodeId });
+    socketService.emit('join_pool', { freq: selectedFreq, profile, nodeId });
   };
 
   const onBootComplete = useCallback(() => {
-    setAppState('PROFILE');
-  }, []);
+    if (profile.name && profile.age && profile.gender) {
+      setAppState('DASHBOARD');
+    } else {
+      setAppState('PROFILE');
+    }
+  }, [profile]);
 
   const toggleTheme = () => {
-    setTheme(prev => prev === 'green' ? 'amber' : 'green');
+    setTheme(prev => {
+      if (prev === 'green') return 'amber';
+      if (prev === 'amber') return 'ghost';
+      return 'green';
+    });
   };
 
   const toggleAudioMute = () => {
@@ -133,7 +148,7 @@ export default function App() {
   };
 
   return (
-    <div className={`crt-screen h-screen w-screen overflow-hidden bg-black selection:bg-[var(--phos-color)] selection:text-black ${isGlitching ? 'fx-aberration' : ''}`}>
+    <div className={`crt-screen h-screen w-screen overflow-hidden bg-[var(--bg-color)] text-[var(--phos-color)] selection:bg-[var(--phos-color)] selection:text-[var(--bg-color)] ${isGlitching ? 'fx-aberration' : ''}`}>
       <div className="crt-scanline-bar" />
       <div className="crt-overlay" />
       <div className="crt-bottom-fade" />
@@ -203,59 +218,30 @@ export default function App() {
               
               {appState === 'PROFILE' && (
                 <motion.div key="profile" exit={{ opacity: 0 }} className="h-full">
-                  <ProfileSetupScreen onComplete={(p) => { setProfile(p); setAppState('DASHBOARD'); }} />
+                  <ProfileSetupScreen 
+                    initialProfile={profile}
+                    onComplete={(p) => { 
+                      setProfile(p); 
+                      localStorage.setItem(`profile_${nodeId}`, JSON.stringify(p));
+                      setAppState('DASHBOARD'); 
+                    }} 
+                  />
                 </motion.div>
               )}
 
               {appState === 'DASHBOARD' && (
                 <motion.div key="dashboard" exit={{ opacity: 0 }} className="h-full">
                   <DashboardScreen 
-                    onFindConnection={() => setAppState('MOOD')} 
+                    onFindConnection={() => setAppState('FREQUENCY')} 
                     reputation={reputation} 
-                    voidMessages={voidMessages} 
                     atmosphere={atmosphere} 
                   />
                 </motion.div>
               )}
 
-              {appState === 'MOOD' && (
-                <motion.div key="mood" exit={{ opacity: 0 }} className="h-full">
-                  <SelectionScreen 
-                    title="SYS > HOW_ARE_YOU_FEELING?" 
-                    farsiTitle="در حال حاضر چه احساسی دارید؟"
-                    subtitle="Select current emotional parameter." 
-                    farsiSubtitle="یک پارامتر احساسی را انتخاب کنید."
-                    options={[
-                      { id: 'lonely', en: 'lonely', fa: 'تنها' },
-                      { id: 'happy', en: 'happy', fa: 'خوشحال' },
-                      { id: 'curious', en: 'curious', fa: 'کنجکاو' },
-                      { id: 'bored', en: 'bored', fa: 'بی‌حوصله' },
-                      { id: 'anxious', en: 'anxious', fa: 'مضطرب' },
-                      { id: 'thoughtful', en: 'thoughtful', fa: 'متفکر' },
-                      { id: 'energetic', en: 'energetic', fa: 'پرانرژی' }
-                    ]} 
-                    onSelect={(m) => { audioService.playKeystroke(); setMood(m); setAppState('INTENT'); }} 
-                  />
-                </motion.div>
-              )}
-
-              {appState === 'INTENT' && (
-                <motion.div key="intent" exit={{ opacity: 0 }} className="h-full">
-                  <SelectionScreen 
-                    title="SYS > WHAT_ARE_YOU_SEEKING?" 
-                    farsiTitle="به دنبال چه هستید؟"
-                    subtitle="Calibrate matching engine intent." 
-                    farsiSubtitle="زمان‌بندی و قصد خود را کالیبره کنید."
-                    options={[
-                      { id: 'deep conversation', en: 'deep conversation', fa: 'گفتگوی عمیق' },
-                      { id: 'random fun', en: 'random fun', fa: 'سرگرمی' },
-                      { id: 'advice', en: 'advice', fa: 'مشورت' },
-                      { id: 'listening', en: 'listening', fa: 'شنونده' },
-                      { id: 'debate', en: 'debate', fa: 'بحث' },
-                      { id: 'storytelling', en: 'storytelling', fa: 'داستان‌گویی' }
-                    ]} 
-                    onSelect={handleJoinPool} 
-                  />
+              {appState === 'FREQUENCY' && (
+                <motion.div key="frequency" exit={{ opacity: 0 }} className="h-full">
+                  <FrequencyTunerScreen onTune={(freq) => { handleJoinPool(freq.toString()); }} />
                 </motion.div>
               )}
 

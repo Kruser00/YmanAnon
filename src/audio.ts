@@ -274,6 +274,52 @@ export class RetroAudio {
     osc.start();
     osc.stop(this.ctx.currentTime + 0.2);
   }
+
+  playMessageSent() {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(600, this.ctx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.1, this.ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.1);
+  }
+
+  playMessageReceived() {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+    osc.frequency.setValueAtTime(400, this.ctx.currentTime + 0.05);
+    gain.gain.setValueAtTime(0, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.15, this.ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.3);
+  }
+
+  playTypingTic() {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1200 + Math.random() * 400, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.02, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.02);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.02);
+  }
 }
 
 export const audioService = new RetroAudio();

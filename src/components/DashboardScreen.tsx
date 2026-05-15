@@ -10,35 +10,19 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function DashboardScreen({ onFindConnection, reputation, voidMessages, atmosphere }: { onFindConnection: () => void, reputation: { positive: number, negative: number }, voidMessages: any[], atmosphere: any }) {
+export function DashboardScreen({ onFindConnection, reputation, atmosphere }: { onFindConnection: () => void, reputation: { positive: number, negative: number }, atmosphere: any }) {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
-  const [voidInput, setVoidInput] = useState("");
-  const voidBottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     socketService.emit('request_atmosphere', {});
   }, []);
 
-  useEffect(() => {
-    if (voidBottomRef.current) {
-      voidBottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [voidMessages]);
-
-  const handleVoidSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!voidInput.trim()) return;
-    socketService.emit('broadcast_void', { text: voidInput });
-    setVoidInput('');
-    audioService.playKeystroke();
-  };
-
-  const totalMoods = (Object.values(atmosphere.moods).reduce((a: number, b: any) => a + (b as number), 0) || 1) as number;
+  const totalFreqs = (Object.values(atmosphere.freqs || {}).reduce((a: number, b: any) => a + (b as number), 0) || 1) as number;
 
   const infoDocs: Record<string, string> = {
     'network': 'GLOBAL_MESH_STATUS. وضعیت شبکه جهانی. فعال‌سازی تمامی گره‌ها.',
     'reputation': 'TRUST_QUOTIENT. شاخص اعتماد. اعتبار شما در هسته عصبی.',
-    'void': 'GLOBAL_BROADCAST. پخش عمومی سیگنال‌های صوتی. خروجی در تمام ترمینال‌ها.',
+    'match': 'NODE_CONNECT. اتصال به یک گره ناشناس بر اساس فرکانس و رمزنگاری.',
   };
 
   return (
@@ -130,14 +114,14 @@ export function DashboardScreen({ onFindConnection, reputation, voidMessages, at
         </div>
       </div>
 
-      <div className="mb-6 sm:mb-12 relative z-10 px-4 flex flex-col md:flex-row gap-6 sm:gap-8">
+      <div className="mb-4 sm:mb-8 relative z-10 px-4 flex flex-col md:flex-row gap-6 sm:gap-8">
         <div className="flex-1">
           <h3 className="phosphor-dim uppercase text-[10px] mb-2 sm:mb-4 tracking-widest flex justify-between items-center pr-4">
             <span>&gt; NEURAL ATMOSPHERE</span>
             <span className="font-sans">جو عصبی</span>
           </h3>
           <div className="space-y-1 sm:space-y-2 font-mono text-[9px] min-h-[100px] sm:min-h-[140px] max-h-[140px] overflow-y-auto overflow-x-hidden pr-2 scrollbar-hide">
-            {Object.entries(atmosphere.moods).length === 0 ? (
+            {!atmosphere.freqs || Object.entries(atmosphere.freqs).length === 0 ? (
                <div className="flex flex-col gap-2 opacity-20">
                  {[1,2,3].map(i => (
                    <div key={i} className="flex items-center gap-4 animate-pulse">
@@ -148,22 +132,20 @@ export function DashboardScreen({ onFindConnection, reputation, voidMessages, at
                  ))}
                  <div className="text-[7px] italic mt-2">ANALYZING_NODE_STREAMS...</div>
                </div>
-            ) : Object.entries(atmosphere.moods).map(([mood, count]: [string, any]) => {
-              const pct = Math.round(((count as number) / totalMoods) * 100);
-              const moodFarsi: Record<string, string> = {
-                'lonely': 'تنها',
-                'happy': 'خوشحال',
-                'curious': 'کنجکاو',
-                'bored': 'بی‌حوصله',
-                'anxious': 'مضطرب',
-                'thoughtful': 'متفکر',
-                'energetic': 'پرانرژی'
+            ) : Object.entries(atmosphere.freqs).map(([freq, count]: [string, any]) => {
+              const pct = totalFreqs > 0 ? Math.round(((count as number) / totalFreqs) * 100) : 0;
+              const freqFarsi: Record<string, string> = {
+                '88.0': 'تپش‌های خاموش',
+                '90.2': 'امواج محرمانه',
+                '101.5': 'پهنای باند آزاد',
+                '104.4': 'اکوی داستان‌ها',
+                '108.0': 'نویزهای سوزان'
               };
               return (
-                <div key={mood} className="flex flex-row items-center gap-2 sm:gap-4">
+                <div key={freq} className="flex flex-row items-center gap-2 sm:gap-4">
                    <div className="w-16 sm:w-24 uppercase font-bold tracking-wide truncate text-[8px] sm:text-[10px] flex flex-col leading-tight">
-                     <span>{mood}</span>
-                     <span className="font-sans opacity-70 text-[9px]">{moodFarsi[mood] || ''}</span>
+                     <span>{freq} MHz</span>
+                     <span className="font-sans opacity-70 text-[9px]">{freqFarsi[freq] || ''}</span>
                    </div>
                    <div className="flex-1 h-1.5 sm:h-2 bg-[var(--phos-color)]/10 overflow-hidden relative border border-[var(--phos-color)]/20 shadow-[0_0_5px_var(--phos-dim)]">
                       <motion.div 
@@ -179,55 +161,6 @@ export function DashboardScreen({ onFindConnection, reputation, voidMessages, at
             })}
           </div>
         </div>
-
-        <div className="flex-1 flex flex-col gap-4">
-          <div 
-            onClick={() => { setActiveInfo(activeInfo === 'void' ? null : 'void'); }}
-            onMouseEnter={() => setActiveInfo('void')} 
-            onMouseLeave={() => setActiveInfo(null)}
-            className={cn(
-               "flex-1 border border-[var(--phos-color)]/20 p-3 sm:p-4 bg-black/20 flex flex-col overflow-hidden transition-colors h-[250px] sm:h-[350px]",
-               activeInfo === 'void' ? "border-[var(--phos-color)]/60 bg-[var(--phos-color)]/5" : "hover:border-[var(--phos-color)]/40 hover:bg-black/30"
-            )}
-          >
-            <div className="flex justify-between items-center border-b border-[var(--phos-color)]/20 pb-1 mb-2 shrink-0">
-              <h3 className="phosphor-dim uppercase text-[10px] tracking-widest font-mono">GLOBAL_BROADCAST</h3>
-              <div className="text-[8px] animate-pulse flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-bounce"></span>
-                LIVE
-              </div>
-            </div>
-            <div className="flex-1 space-y-1 overflow-y-auto scrollbar-hide flex flex-col">
-              {voidMessages.length === 0 ? (
-                 <div className="text-[9px] opacity-30 italic font-mono text-center mt-auto mb-auto">Static noise...</div>
-              ) : voidMessages.map((m, i) => (
-                 <motion.div 
-                   key={i} 
-                   initial={{ opacity: 0, x: -10 }}
-                   animate={{ opacity: 1, x: 0 }}
-                   className="font-mono text-[9px] sm:text-[11px] hover:bg-[var(--phos-color)]/10 px-1 py-0.5 rounded flex items-start gap-2 break-all"
-                 >
-                   <span className="opacity-50 shrink-0 select-none">[{new Date(m.timestamp || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}]</span>
-                   <span className="font-bold shrink-0">{m.nodeId ? `${m.nodeId.substring(0, 6)}:` : 'SYS:'}</span>
-                   <span className="phosphor-glow whitespace-pre-wrap flex-1">{m.text}</span>
-                 </motion.div>
-              ))}
-              <div ref={voidBottomRef} className="shrink-0"></div>
-            </div>
-            <form onSubmit={handleVoidSubmit} className="mt-2 border-t border-[var(--phos-color)]/20 pt-2 flex items-center gap-2 shrink-0">
-              <span className="opacity-50 text-[10px] select-none">&gt;</span>
-              <input 
-                type="text" 
-                value={voidInput}
-                onChange={(e) => setVoidInput(e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                className="flex-1 bg-transparent outline-none text-[10px] sm:text-xs text-[var(--phos-color)] placeholder:opacity-30"
-                placeholder="Broadcast to all nodes..."
-                maxLength={120}
-              />
-            </form>
-          </div>
-        </div>
       </div>
 
       <div className="flex flex-col font-mono relative z-10 px-4">
@@ -235,7 +168,7 @@ export function DashboardScreen({ onFindConnection, reputation, voidMessages, at
            onClick={() => { audioService.playKeystroke(); onFindConnection(); }}
            onMouseEnter={() => setActiveInfo('match')} 
            onMouseLeave={() => setActiveInfo(null)}
-           className="w-full border-2 bg-[var(--phos-color)]/10 border-[var(--phos-color)] p-4 sm:p-6 hover:bg-[var(--phos-color)]/20 hover:shadow-[0_0_20px_var(--phos-color)] transition-all flex flex-col items-center justify-center gap-3 relative overflow-hidden group"
+           className="w-full border-2 bg-[var(--phos-color)]/10 border-[var(--phos-color)] p-4 sm:p-6 hover:bg-[var(--phos-color)]/20 hover:shadow-[0_0_20px_var(--phos-color)] transition-all flex flex-col items-center justify-center gap-3 relative overflow-hidden group mb-6"
         >
            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[var(--phos-color)]/10 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
            <Heart size={32} className="text-[var(--phos-color)] group-hover:animate-pulse group-hover:scale-110 transition-transform" />
