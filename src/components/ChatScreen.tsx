@@ -531,21 +531,6 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
            <span className="font-sans text-[8px] opacity-70">تصویر</span>
         </button>
         
-        <button 
-          onClick={() => {
-             audioService.playKeystroke();
-             socketService.emit('trigger_activity', {});
-          }}
-          className="border border-[var(--phos-color)]/40 px-2 sm:px-3 py-1 bg-[var(--phos-color)]/10 hover:bg-[var(--phos-color)]/20 hover:text-white transition-colors flex items-center gap-1 group ml-auto sticky right-0 z-10"
-          title="Inject Activity"
-        >
-           <Terminal size={12} className="group-hover:animate-pulse" />
-           <div className="flex flex-col items-center">
-             <span className="hidden sm:inline">Inject Activity</span>
-             <span className="sm:hidden">Inject</span>
-             <span className="font-sans text-[8px] opacity-70">فعالیت</span>
-           </div>
-        </button>
       </div>
 
       {/* Messages */}
@@ -578,8 +563,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                </div>
             )}
             <span className={cn(
-              "font-sans", 
-              m.system ? "font-mono" : "text-[13px] sm:text-base leading-relaxed",
+              "font-fa", 
+              m.system ? "font-mono" : "text-[13px] sm:text-base leading-relaxed text-start block w-full",
               m.boost === 'redact' ? "select-none" : ""
             )}>
               {m.text}
@@ -811,8 +796,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                type="text" 
                value={input}
                onChange={handleInputChange}
-               className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base focus:ring-0 min-w-0"
-               placeholder="Transmit message..."
+               className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-fa text-sm sm:text-base focus:ring-0 min-w-0"
+               placeholder="ارسال پیام... ( /CMD برای دستورات )"
                autoFocus /* eslint-disable-line jsx-a11y/no-autofocus */
                autoComplete="off"
                dir="auto"

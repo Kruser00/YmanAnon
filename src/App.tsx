@@ -14,10 +14,11 @@ import {
   ConversationStatsScreen, 
   RatingScreen,
   FrequencyTunerScreen,
-  AuthScreen
+  AuthScreen,
+  DataMineScreen
 } from './components';
 
-type AppState = 'START' | 'BOOT' | 'AUTH' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'FREQUENCY' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'RATING' | 'CHAT_STATS';
+type AppState = 'START' | 'BOOT' | 'AUTH' | 'PROFILE' | 'DASHBOARD' | 'MOOD' | 'INTENT' | 'FREQUENCY' | 'MATCHING' | 'CHAT_BOOT' | 'CHAT' | 'RATING' | 'CHAT_STATS' | 'DATA_MINE';
 type Theme = 'green' | 'amber' | 'ghost';
 
 export default function App() {
@@ -299,10 +300,17 @@ export default function App() {
                 <motion.div key="dashboard" exit={{ opacity: 0 }} className="h-full">
                   <DashboardScreen 
                     onFindConnection={() => setAppState('FREQUENCY')} 
+                    onDataMine={() => setAppState('DATA_MINE')}
                     reputation={reputation} 
                     atmosphere={atmosphere} 
                     voidMessages={voidMessages}
                   />
+                </motion.div>
+              )}
+
+              {appState === 'DATA_MINE' && (
+                <motion.div key="datamine" exit={{ opacity: 0 }} className="h-full">
+                  <DataMineScreen onBack={() => setAppState('DASHBOARD')} />
                 </motion.div>
               )}
 

@@ -584,6 +584,17 @@ async function startServer() {
         socket.to(user.currentRoom).emit('partner_unlocked_feature', data);
       }
     });
+
+    socket.on('mining_complete', (data) => {
+       const user = socketToUser.get(sId);
+       if (user && data.amount > 0 && data.amount <= 100) { // arbitrary cap to prevent abuse
+          user.points += data.amount;
+          if (!user.isGuest) {
+             db.prepare('UPDATE users SET points = ? WHERE id = ?').run(user.points, user.nodeId);
+          }
+          syncUserState(sId);
+       }
+    });
   });
 
   if (process.env.NODE_ENV !== "production") {

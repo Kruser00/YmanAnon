@@ -10,7 +10,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function DashboardScreen({ onFindConnection, reputation, atmosphere, voidMessages = [] }: { onFindConnection: () => void, reputation: { positive: number, negative: number }, atmosphere: any, voidMessages?: any[] }) {
+export function DashboardScreen({ onFindConnection, onDataMine, reputation, atmosphere, voidMessages = [] }: { onFindConnection: () => void, onDataMine: () => void, reputation: { positive: number, negative: number }, atmosphere: any, voidMessages?: any[] }) {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -203,6 +203,18 @@ export function DashboardScreen({ onFindConnection, reputation, atmosphere, void
              </p>
            </div>
         </button>
+      </div>
+      <div className="px-4">
+         <button 
+           onClick={() => { audioService.playKeystroke(); onDataMine(); }}
+           className="w-full border border-[var(--phos-color)]/30 bg-black/60 p-3 sm:p-4 hover:bg-[var(--phos-color)]/10 hover:border-[var(--phos-color)]/50 transition-all flex items-center justify-center gap-3 relative overflow-hidden group mb-6 flex-row-reverse"
+         >
+           <Terminal size={18} className="text-[var(--phos-color)]/70 group-hover:text-[var(--phos-color)] mx-4" />
+           <div className="flex flex-col items-start text-right flex-1" dir="rtl">
+             <span className="uppercase tracking-widest text-xs sm:text-sm font-bold font-mono text-[var(--phos-color)]/80 group-hover:text-[var(--phos-color)] text-left w-full translate-y-1 sm:translate-y-2">DATA_MINE</span>
+             <span className="font-fa text-[10px] sm:text-xs text-[var(--phos-color)]/50 mt-1">استخراج داده (تماشای تبلیغ) - کسب امتیاز ۵۰+</span>
+           </div>
+         </button>
       </div>
 
       <div className="mt-6 text-center opacity-40 px-4 pb-6">
