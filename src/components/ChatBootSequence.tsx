@@ -31,7 +31,7 @@ export function ChatBootSequence({ onComplete }: { onComplete: () => void }) {
     }, 100);
 
     const timer = setTimeout(() => {
-      console.log('[DEBUG] ChatBootSequence complete, transitioning to CHAT');
+      // Boot sequence complete, transition to CHAT
       clearInterval(interval);
       onComplete();
     }, 2800);

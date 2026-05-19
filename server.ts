@@ -25,9 +25,24 @@ db.exec(`
   )
 `);
 
+import winston from 'winston';
+
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf(({ timestamp, level, message }) => {
+      return `[${timestamp}] ${level.toUpperCase()}: ${message}`;
+    })
+  ),
+  transports: [
+    new winston.transports.Console()
+  ]
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
 if (!process.env.JWT_SECRET) {
-  console.warn("WARNING: JWT_SECRET environment variable not set. Using random ephemeral key.");
+  logger.warn("JWT_SECRET environment variable not set. Using random ephemeral key.");
 }
 
 const apiLimiter = rateLimit({
@@ -261,7 +276,7 @@ async function startServer() {
     
     let user = nodeToUser.get(nodeId);
     if (!user) {
-        console.log(`[CORE_SYNC] Initializing identity matrix for node: ${nodeId}`);
+        logger.info(`[CORE_SYNC] Initializing identity matrix for node: ${nodeId}`);
         user = {
             nodeId,
             points: isGuest ? 200 : (dbUser ? dbUser.points : 200),
@@ -276,7 +291,7 @@ async function startServer() {
         };
         nodeToUser.set(nodeId, user);
     } else {
-        console.log(`[CORE_SYNC] Node re-linked: ${nodeId} | Balance: ${user.points}`);
+        logger.info(`[CORE_SYNC] Node re-linked: ${nodeId} | Balance: ${user.points}`);
         // If they had logged in from elsewhere or reconnect, sync DB points just in case
         if (!isGuest && dbUser) {
             user.points = dbUser.points;
@@ -293,7 +308,7 @@ async function startServer() {
   };
 
   io.on('connection', (socket) => {
-    console.log('[RAM_STORAGE] Terminal connect:', socket.id);
+    logger.info(`[RAM_STORAGE] Terminal connect: ${socket.id}`);
     const sId = socket.id;
 
     syncAtmosphere();
@@ -596,8 +611,8 @@ async function startServer() {
   }, 5000);
 
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Ephemeral Server running on http://localhost:${PORT}`);
+    logger.info(`Ephemeral Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer().catch(console.error);
+startServer().catch((err) => logger.error(`Fatal server error: ${err}`));

@@ -32,6 +32,7 @@ export default function App() {
   const [topic, setTopic] = useState<string | null>(null);
   const [chatStats, setChatStats] = useState<{ duration: number, rank: string, messageCount: number } | null>(null);
   const [atmosphere, setAtmosphere] = useState<{ freqs?: Record<string, number>, online: number }>({ freqs: {}, online: 0 });
+  const [isConnected, setIsConnected] = useState(true);
   const [theme, setTheme] = useState<Theme>('green');
   const [nodeId, setNodeId] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -68,6 +69,12 @@ export default function App() {
 
   useEffect(() => {
     socketService.connect();
+
+    const handleConnectState = () => setIsConnected(true);
+    const handleDisconnectState = () => setIsConnected(false);
+
+    socketService.on('connect', handleConnectState);
+    socketService.on('disconnect', handleDisconnectState);
 
     socketService.on('match_found', (data: any) => {
       setRoomId(data.roomId);
@@ -114,6 +121,8 @@ export default function App() {
     });
 
     return () => {
+      socketService.off('connect', handleConnectState);
+      socketService.off('disconnect', handleDisconnectState);
       socketService.off('match_found');
       socketService.off('rejoined_room');
       socketService.off('chat_terminated');
@@ -199,6 +208,13 @@ export default function App() {
       <div className="crt-curve h-full w-full relative flex flex-col">
         <BackgroundCode mood={mood} />
         
+        {!isConnected && (
+          <div className="absolute top-0 left-0 w-full bg-red-600/80 text-white font-mono text-center py-2 z-50 text-xs sm:text-sm animate-pulse flex flex-col items-center justify-center border-b border-red-500">
+             <span className="font-bold tracking-widest">CONNECTION LOST / قطعی ارتباط</span>
+             <span className="text-[10px] opacity-80 mt-1">Re-establishing neural link... / در حال برقراری مجدد ارتباط...</span>
+          </div>
+        )}
+
         <div className="flex-1 p-4 sm:p-8 flex flex-col pointer-events-auto z-10 overflow-hidden">
           <header className="flex justify-between items-center border-b border-[var(--phos-color)]/30 pb-2 mb-4 sm:mb-6">
             <div className="flex flex-col">

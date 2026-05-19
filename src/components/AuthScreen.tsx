@@ -16,6 +16,21 @@ export function AuthScreen({ onComplete }: { onComplete: (token?: string) => voi
        return;
     }
 
+    if (!isLogin) {
+       if (username.length < 3 || username.length > 20) {
+          setError('IDENTIFIER_LENGTH: 3-20 CHARS REQUIRED (طول نام کاربری: ۳ تا ۲۰ کاراکتر)');
+          return;
+       }
+       if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+          setError('IDENTIFIER_FORMAT: ALPHANUMERIC ONLY (فرمت نام کاربری: فقط حروف انگلیسی و اعداد)');
+          return;
+       }
+       if (password.length < 6 || password.length > 100) {
+          setError('PASSPHRASE_LENGTH: 6-100 CHARS REQUIRED (طول رمز عبور: ۶ تا ۱۰۰ کاراکتر)');
+          return;
+       }
+    }
+
     setLoading(true);
     try {
       const endpoint = isLogin ? '/api/login' : '/api/register';
