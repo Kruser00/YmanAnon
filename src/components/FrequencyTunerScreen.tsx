@@ -97,7 +97,7 @@ export function FrequencyTunerScreen({ onTune }: { onTune: (freq: string) => voi
             className="w-full h-8 z-10 appearance-none cursor-ew-resize bg-transparent"
              style={{ outline: 'none' }}
           />
-          <style jsx>{`
+          <style>{`
             input[type=range]::-webkit-slider-thumb {
               appearance: none;
               width: 8px;

@@ -459,36 +459,39 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
          <div className="absolute inset-0 bg-red-900/10 pointer-events-none z-50" />
       )}
       
-      {/* Top Header - Using flex instead of absolute positioning to prevent overlap */}
-      <div className="flex justify-between items-center bg-black/60 backdrop-blur-sm border-b border-[var(--phos-color)]/20 p-2 z-30">
-        <div>
-          {secondsRemaining !== null && (
-            <div className="flex items-center gap-2 border border-yellow-500/30 p-1 px-2">
-              <div className="flex flex-col">
-                <span className="text-[8px] uppercase tracking-tighter text-yellow-500/70 font-mono">Memory Decay / زوال حافظه</span>
-                <span className={cn(
-                   "text-xs sm:text-sm font-bold font-mono phosphor-glow leading-none",
-                   secondsRemaining < 30 ? "text-red-500 fx-jitter" : "text-yellow-500"
-                )}>
-                  {Math.floor(secondsRemaining / 60)}:{Math.floor(secondsRemaining % 60).toString().padStart(2, '0')}
-                </span>
-              </div>
-              <button 
-                onClick={handleProlong}
-                disabled={points < 200}
-                className="bg-yellow-500/10 border border-yellow-500/40 text-yellow-500 text-[8px] px-1.5 py-1 uppercase hover:bg-yellow-500/20 disabled:opacity-30 transition-all font-bold ml-1"
-              >
-                Delay (200) / تمدید
-              </button>
-            </div>
-          )}
+      {/* Top Header */}
+      <div className="flex justify-between items-center border-b-2 border-[var(--phos-color)] p-3 sm:p-4 z-30 bg-black/90 shadow-[0_10px_20px_rgba(0,0,0,0.8)]">
+        <div className="flex items-center gap-4">
+           <div>
+             {secondsRemaining !== null && (
+               <div className="flex items-center gap-2 border border-yellow-500/50 p-1 px-3 bg-yellow-500/5 shadow-[0_0_10px_rgba(234,179,8,0.2)]">
+                 <div className="flex flex-col">
+                   <span className="text-[8px] sm:text-[9px] uppercase tracking-widest text-yellow-500/70 font-mono">CONNECTION DECAY</span>
+                   <span className={cn(
+                      "text-sm sm:text-lg font-bold font-mono text-yellow-500 leading-none",
+                      secondsRemaining < 30 ? "text-red-500 fx-jitter shadow-[0_0_10px_rgba(255,0,0,0.8)]" : ""
+                   )}>
+                     {Math.floor(secondsRemaining / 60)}:{Math.floor(secondsRemaining % 60).toString().padStart(2, '0')}
+                   </span>
+                 </div>
+                 <button 
+                   onClick={handleProlong}
+                   disabled={points < 200}
+                   className="bg-yellow-500/10 border border-yellow-500/40 text-yellow-500 text-[9px] sm:text-[10px] px-2 py-1 uppercase hover:bg-yellow-500/20 disabled:opacity-30 transition-all font-bold ml-2 tracking-widest hover:shadow-[0_0_10px_rgba(234,179,8,0.5)]"
+                 >
+                   EXTEND (200)
+                 </button>
+               </div>
+             )}
+           </div>
         </div>
+
         <button 
           onClick={() => { audioService.playKeystroke(); socketService.emit('leave_pool', {}); }} 
-          className="p-1 px-2 hover:bg-[var(--phos-color)]/20 text-[9px] sm:text-[10px] font-mono uppercase border border-[var(--phos-color)]/30 text-red-500 flex flex-col items-center"
+          className="p-1 px-3 sm:px-4 hover:bg-red-500/20 text-[10px] sm:text-[11px] font-mono uppercase tracking-widest border border-red-500/50 text-red-500 flex flex-col items-center transition-colors bg-red-500/5 hover:shadow-[inset_0_0_15px_rgba(255,0,0,0.5)]"
         >
-            <span>Disconnect</span>
-            <span className="font-sans text-[10px]">قطع اتصال</span>
+            <span>DISCONNECT</span>
+            <span className="font-sans text-[10px] opacity-80 pt-1">قطع ارتباط</span>
         </button>
       </div>
 
@@ -535,27 +538,22 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 relative z-10 backdrop-blur-[1px] scrollbar-hide pb-10">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2 sm:space-y-4 relative z-10 scrollbar-hide pb-10 bg-black/40">
         {messages.map((m, i) => {
-          const reversedIndex = messages.length - 1 - i;
-          // Fading terminal effect: older messages fade out
-          const msgOpacity = Math.max(0.2, 1 - Math.max(0, reversedIndex - 4) * 0.15);
-          
           return (
-          <motion.div
+              <motion.div
             key={m.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, y: 10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
             className={cn(
-               "max-w-[85%] sm:max-w-[80%] break-words p-2 sm:p-3 relative group will-change-[opacity]",
-               m.system ? "mx-auto text-center border-y border-[var(--phos-color)]/30 text-[10px] sm:text-xs text-[var(--phos-color)] uppercase max-w-full my-3 sm:my-4 phosphor-dim" :
-               m.isSelf ? "ml-auto border border-[var(--phos-color)]/50 bg-[var(--phos-color)]/5 text-[var(--phos-color)]" : 
-               "mr-auto border border-[var(--phos-color)]/20 text-[var(--phos-color)] opacity-90",
-               m.boost === 'highlight' ? "shadow-[0_0_15px_var(--phos-color)] border-[var(--phos-color)] phosphor-glow" : "",
+               "max-w-[85%] sm:max-w-[75%] break-words p-3 sm:p-4 mb-4 relative group will-change-[opacity,transform] backdrop-blur-sm shadow-sm",
+               m.system ? "mx-auto text-center border-y border-[var(--phos-color)]/30 text-[10px] sm:text-xs text-[var(--phos-color)] uppercase max-w-full my-4 sm:my-6 phosphor-dim bg-black/40 shadow-none border-x-4 border-x-[var(--phos-color)]/20" :
+               m.isSelf ? "ml-auto border border-[var(--phos-color)]/30 bg-[var(--phos-color)]/10 text-[var(--phos-color)] shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] border-l-4 border-l-[var(--phos-color)]" : 
+               "mr-auto border border-[var(--phos-color)]/20 bg-black/80 text-[var(--phos-color)]/90 shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] border-r-4 border-r-[var(--phos-color)]/50",
+               m.boost === 'highlight' ? "shadow-[0_0_20px_var(--phos-color)] border-[var(--phos-color)] phosphor-glow bg-[var(--phos-color)]/20" : "",
                m.boost === 'glitch' ? "fx-jitter" : "",
                m.boost === 'redact' ? "bg-black text-black hover:text-[var(--phos-color)] transition-colors cursor-pointer" : ""
             )}
-            style={{ opacity: msgOpacity }}
             dir="auto"
           >
             {m.system && <span className="mr-2">***</span>}
@@ -577,12 +575,26 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             </span>
             {m.system && <span className="ml-2">***</span>}
 
-            {/* Status Indicator */}
+            {/* Status Indicator & Timestamp */}
             {m.isSelf && !m.system && (
-               <div className="absolute -bottom-4 right-1 text-[8px] font-mono opacity-50 uppercase tracking-tighter">
-                 {m.status === 'sent' && 'SENT'}
-                 {m.status === 'delivered' && 'DLVRD'}
-                 {m.status === 'read' && <span className="text-[var(--phos-color)] font-bold">READ</span>}
+               <div className="flex items-center gap-1 absolute -bottom-5 right-0 text-[10px] font-mono opacity-60 uppercase tracking-tighter">
+                 <span className="opacity-50">
+                   {new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) !== "Invalid Date" 
+                      ? new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                      : ""}
+                 </span>
+                 {m.status === 'sent' && <span>[+]</span>}
+                 {m.status === 'delivered' && <span>[++]</span>}
+                 {m.status === 'read' && <span className="text-[var(--phos-color)] font-bold">[#]</span>}
+               </div>
+            )}
+            {!m.isSelf && !m.system && (
+               <div className="flex items-center gap-1 absolute -bottom-5 left-0 text-[10px] font-mono opacity-50 uppercase tracking-tighter">
+                 <span>
+                   {new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) !== "Invalid Date" 
+                      ? new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                      : ""}
+                 </span>
                </div>
             )}
 
@@ -646,32 +658,49 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
         {partnerTyping && (
           <motion.div 
-            initial={{ opacity: 0, y: 5 }} 
-            animate={{ opacity: 1, y: 0 }} 
+            initial={{ opacity: 0, x: -10 }} 
+            animate={{ opacity: 1, x: 0 }} 
             exit={{ opacity: 0 }}
-            className="text-[9px] sm:text-xs font-mono text-[var(--phos-color)]/50 uppercase ml-4 animate-pulse flex items-center gap-2"
+            className="text-[10px] sm:text-xs font-mono text-[var(--phos-color)]/70 uppercase ml-4 mt-2 flex items-center gap-3 backdrop-blur-sm bg-black/40 p-2 border-l-2 border-[var(--phos-color)]/50 w-fit"
           >
-             <span>INCOMING_TRANSMISSION</span>
-             <div className="flex gap-1">
-               <span className="w-1 h-1 bg-[var(--phos-color)]/50 animate-bounce" style={{ animationDelay: '0ms' }} />
-               <span className="w-1 h-1 bg-[var(--phos-color)]/50 animate-bounce" style={{ animationDelay: '150ms' }} />
-               <span className="w-1 h-1 bg-[var(--phos-color)]/50 animate-bounce" style={{ animationDelay: '300ms' }} />
+             <span className="animate-pulse">DECRYPTING_SIGNAL</span>
+             <div className="flex gap-1 items-end h-3">
+               <span className="w-1.5 bg-[var(--phos-color)]/70 animate-[pulse_0.4s_ease-in-out_infinite]" style={{ height: '40%' }} />
+               <span className="w-1.5 bg-[var(--phos-color)]/70 animate-[pulse_0.6s_ease-in-out_infinite_0.1s]" style={{ height: '100%' }} />
+               <span className="w-1.5 bg-[var(--phos-color)]/70 animate-[pulse_0.5s_ease-in-out_infinite_0.2s]" style={{ height: '60%' }} />
+               <span className="w-1.5 bg-[var(--phos-color)]/70 animate-[pulse_0.7s_ease-in-out_infinite_0.3s]" style={{ height: '80%' }} />
+               <span className="w-1.5 bg-[var(--phos-color)]/70 animate-[pulse_0.45s_ease-in-out_infinite_0.4s]" style={{ height: '30%' }} />
              </div>
           </motion.div>
         )}
         
         {/* WebRTC Overlays */}
         {(isVoiceActive || callActive) && (
-          <div className="border border-[var(--phos-color)] bg-black/80 my-4 p-2 relative flex flex-wrap gap-4 justify-center items-center">
-             <div className="absolute top-1 left-2 text-[8px] uppercase tracking-widest text-[var(--phos-color)]/50">SECURE_AV_CHANNEL</div>
+          <div className="border-2 border-[var(--phos-color)] bg-black/90 my-6 p-4 relative flex flex-wrap gap-6 justify-center items-center shadow-[0_0_20px_rgba(0,0,0,0.9)] max-w-2xl mx-auto rounded-sm">
+             <div className="absolute top-0 left-0 bg-[var(--phos-color)] text-black px-2 py-0.5 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse border border-black hidden sm:block"></span>
+                SECURE AV LINK DETECTED
+             </div>
              {isVideoActive ? (
                 <>
-                  <video ref={localVideoRef} autoPlay muted playsInline className="h-24 w-auto border border-[var(--phos-color)]/50 grayscale contrast-125 object-cover" />
-                  <video ref={remoteVideoRef} autoPlay playsInline className="h-32 w-auto border border-[var(--phos-color)] grayscale contrast-125 object-cover" />
+                  <div className="relative border-4 border-black shadow-[0_0_15px_var(--phos-color)]">
+                     <video ref={localVideoRef} autoPlay muted playsInline className="h-28 sm:h-40 w-auto grayscale contrast-125 object-cover" />
+                     <div className="absolute bottom-1 left-1 bg-black/80 text-[var(--phos-color)] text-[8px] px-1">LOCAL</div>
+                  </div>
+                  <div className="relative border-4 border-black shadow-[0_0_15px_var(--phos-color)]">
+                     <video ref={remoteVideoRef} autoPlay playsInline className="h-32 sm:h-48 w-auto grayscale contrast-125 object-cover" />
+                     <div className="absolute bottom-1 left-1 bg-black/80 text-[var(--phos-color)] text-[8px] px-1">REMOTE</div>
+                  </div>
                 </>
              ) : (
-                <div className="h-16 flex items-center justify-center font-mono text-sm uppercase px-8">
-                   [ Voice Stream Active ]
+                <div className="h-24 w-full flex flex-col items-center justify-center font-mono text-sm uppercase px-8 border border-[var(--phos-color)]/30 bg-[var(--phos-color)]/5 mt-4">
+                   <div className="flex gap-2 items-center mb-2">
+                       <span className="w-1 h-4 bg-[var(--phos-color)] animate-ping"></span>
+                       <span className="w-1 h-6 bg-[var(--phos-color)] animate-ping" style={{animationDelay: '100ms'}}></span>
+                       <span className="w-1 h-3 bg-[var(--phos-color)] animate-ping" style={{animationDelay: '200ms'}}></span>
+                       <span className="w-1 h-5 bg-[var(--phos-color)] animate-ping" style={{animationDelay: '300ms'}}></span>
+                   </div>
+                   <span className="text-[var(--phos-color)]/70 text-xs tracking-widest">[ ENCRYPTED VOICE STREAM ]</span>
                    <audio ref={remoteVideoRef as any} autoPlay />
                 </div>
              )}
@@ -680,25 +709,25 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
         {/* Start Call UI if unlocked */}
         {!callActive && isVoiceAvailable && (
-           <div className="flex justify-center p-2 mb-2">
+           <div className="flex justify-center p-2 mb-2 w-full max-w-sm mx-auto">
               <button 
                 onClick={startVoiceCall}
-                className="border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-1 flex flex-col items-center hover:bg-[var(--phos-color)]/30"
+                className="w-full border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-3 flex flex-col items-center justify-center hover:bg-[var(--phos-color)]/30 transition-all hover:shadow-[0_0_15px_var(--phos-color)]"
               >
-                 <span className="text-[10px] uppercase tracking-widest font-mono">INITIATE_VOICE_LINK</span>
-                 <span className="font-sans text-[11px]">شروع تماس صوتی</span>
+                 <span className="text-[11px] sm:text-xs uppercase tracking-widest font-mono font-bold">INITIATE VOICE LINK</span>
+                 <span className="font-sans text-[10px] opacity-70 mt-1">شروع تماس صوتی</span>
               </button>
            </div>
         )}
         
         {!callActive && isVideoAvailable && (
-           <div className="flex justify-center p-2 mb-2">
+           <div className="flex justify-center p-2 mb-6 w-full max-w-sm mx-auto">
               <button 
                 onClick={startVideoCall}
-                className="border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-1 flex flex-col items-center hover:bg-[var(--phos-color)]/30"
+                className="w-full border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-3 flex flex-col items-center justify-center hover:bg-[var(--phos-color)]/30 transition-all hover:shadow-[0_0_15px_var(--phos-color)]"
               >
-                 <span className="text-[10px] uppercase tracking-widest font-mono">INITIATE_VIDEO_LINK</span>
-                 <span className="font-sans text-[11px]">شروع تماس تصویری</span>
+                 <span className="text-[11px] sm:text-xs uppercase tracking-widest font-mono font-bold">INITIATE VIDEO LINK</span>
+                 <span className="font-sans text-[10px] opacity-70 mt-1">شروع تماس تصویری</span>
               </button>
            </div>
         )}
@@ -738,7 +767,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       )}
 
       {/* Input Base */}
-      <form onSubmit={sendMessage} className="border-t border-[var(--phos-color)]/30 p-1 sm:p-2 flex bg-black/60 relative z-20 items-center">
+      <form onSubmit={sendMessage} className="border-t-2 border-[var(--phos-color)]/50 p-2 sm:p-3 flex bg-black relative z-20 items-center shadow-[0_-10px_20px_rgba(0,0,0,0.8)]">
         <label className="cursor-pointer pl-2 pr-1 opacity-80 hover:opacity-100 transition-opacity flex items-center justify-center group relative overflow-visible flex-shrink-0">
           <input 
             type="file" 
@@ -747,44 +776,53 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             className="hidden" 
             ref={fileInputRef}
           />
-          <div className="flex items-center justify-center border border-[var(--phos-color)] text-[var(--phos-color)] bg-[var(--phos-color)]/10 group-hover:bg-[var(--phos-color)] px-2 py-1 gap-1 transition-all">
-             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:text-black">
+          <div className="flex items-center justify-center border border-[var(--phos-color)] text-[var(--phos-color)] bg-[var(--phos-color)]/10 group-hover:bg-[var(--phos-color)] px-2 py-1 gap-1 transition-all h-10">
+             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:text-black">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                 <circle cx="8.5" cy="8.5" r="1.5"/>
                 <polyline points="21 15 16 10 5 21"/>
              </svg>
-             <span className="font-mono text-[10px] group-hover:text-black uppercase tracking-wider font-bold">50 PTS</span>
           </div>
-          <div className="absolute bottom-10 left-0 hidden group-hover:flex whitespace-nowrap bg-black text-[9px] text-[var(--phos-color)] border border-[var(--phos-color)] p-1 z-50 flex-col items-start gap-1">
-             <span>Send self-destructing image [30s]</span>
-             <span className="font-sans opacity-80">ارسال تصویر یکبار مصرف (۳۰ ثانیه)</span>
+          <div className="absolute bottom-12 left-0 hidden group-hover:flex whitespace-nowrap bg-black text-[9px] text-red-500 border border-red-500/50 p-2 z-50 flex-col items-start gap-1 uppercase tracking-widest font-mono shadow-[0_0_10px_rgba(255,0,0,0.3)]">
+             <span>[SECURE IMAGE UPLOAD]</span>
+             <span className="opacity-80 mt-1">Cost: 50 PTS</span>
+             <span className="opacity-80">Self-destruct: 30s</span>
           </div>
         </label>
         
-        <div className="flex items-center phosphor-dim px-2 sm:px-3">
-          <span className="animate-pulse">{'>'}</span>
+        <div className="flex flex-col flex-1 mx-2 relative">
+           <div className="absolute -top-3 left-2 text-[8px] sm:text-[9px] font-mono text-[var(--phos-color)]/70 uppercase tracking-widest bg-black px-1">
+              TERMINAL_INPUT_STREAM
+           </div>
+           <div className="flex items-center border border-[var(--phos-color)]/30 bg-[var(--phos-color)]/5 h-10 px-3 relative">
+             <span className="animate-pulse mr-2 font-mono font-bold text-[var(--phos-color)]">{'>'}</span>
+             <input 
+               type="text" 
+               value={input}
+               onChange={handleInputChange}
+               className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base focus:ring-0 min-w-0"
+               placeholder="Transmit message..."
+               autoFocus /* eslint-disable-line jsx-a11y/no-autofocus */
+               autoComplete="off"
+               dir="auto"
+             />
+           </div>
         </div>
-        <input 
-          type="text" 
-          value={input}
-          onChange={handleInputChange}
-          className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-sans text-sm sm:text-base py-2 px-1 focus:ring-0 min-w-0"
-          placeholder="پیام خود را بنویسید... Message..."
-          autoFocus /* eslint-disable-line jsx-a11y/no-autofocus */
-          autoComplete="off"
-          dir="auto"
-        />
+
         <button 
           type="button" 
-          className="text-[9px] border border-[var(--phos-color)]/30 px-1.5 py-0.5 rounded hover:bg-[var(--phos-color)]/10 mr-2 self-center font-mono"
+          className="text-[10px] border border-[var(--phos-color)]/30 px-2 py-1 rounded-sm hover:bg-[var(--phos-color)]/20 mr-2 self-center font-mono h-10 flex items-center transition-colors"
           title="Terminal Commands: /help, /ping, /roll, /whoami, /clear"
           onClick={() => setInput('/help')}
         >
           /CMD
         </button>
-        <button type="submit" disabled={!input.trim()} className="px-2 sm:px-4 text-[var(--phos-color)] flex flex-col items-center phosphor-dim hover:text-white hover:phosphor-glow disabled:opacity-30 uppercase text-[10px] sm:text-xs font-bold pt-1">
-          <span>Send</span>
-          <span className="font-sans text-[9px] lowercase opacity-70">ارسال</span>
+        <button 
+          type="submit" 
+          disabled={!input.trim()} 
+          className="h-10 px-4 sm:px-6 bg-[var(--phos-color)]/10 border border-[var(--phos-color)] text-[var(--phos-color)] flex items-center justify-center hover:bg-[var(--phos-color)] hover:text-black hover:shadow-[0_0_15px_var(--phos-color)] transition-all disabled:opacity-30 disabled:hover:bg-[var(--phos-color)]/10 disabled:hover:text-[var(--phos-color)] disabled:hover:shadow-none uppercase text-[10px] sm:text-xs font-bold font-mono tracking-widest"
+        >
+          <span>EXEC</span>
         </button>
       </form>
     </div>
