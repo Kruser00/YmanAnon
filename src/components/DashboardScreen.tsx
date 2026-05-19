@@ -10,7 +10,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function DashboardScreen({ onFindConnection, reputation, atmosphere }: { onFindConnection: () => void, reputation: { positive: number, negative: number }, atmosphere: any }) {
+export function DashboardScreen({ onFindConnection, reputation, atmosphere, voidMessages = [] }: { onFindConnection: () => void, reputation: { positive: number, negative: number }, atmosphere: any, voidMessages?: any[] }) {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -164,6 +164,29 @@ export function DashboardScreen({ onFindConnection, reputation, atmosphere }: { 
       </div>
 
       <div className="flex flex-col font-mono relative z-10 px-4">
+        {voidMessages.length > 0 && (
+           <div className="w-full border border-[var(--phos-color)]/30 bg-black/80 p-2 mb-6 shadow-[0_0_15px_var(--phos-dim)] overflow-hidden">
+             <div className="text-[8px] sm:text-[9px] uppercase tracking-widest text-[var(--phos-color)]/70 mb-1 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--phos-color)] animate-ping" />
+                GLOBAL VOID STREAM / پیام‌های همگانی
+             </div>
+             <div className="relative w-full h-[20px] overflow-hidden">
+               <motion.div 
+                 animate={{ y: [0, -((voidMessages.length - 1) * 20)] }}
+                 transition={{ duration: voidMessages.length * 3, ease: 'linear', repeat: Infinity, repeatType: 'reverse' }}
+                 className="flex flex-col text-[10px] sm:text-xs text-[var(--phos-color)] font-sans"
+               >
+                 {voidMessages.map((msg, i) => (
+                    <div key={i} className="h-[20px] flex items-center truncate opacity-80 hover:opacity-100 transition-opacity">
+                       <span className="opacity-50 mr-2 font-mono text-[9px]">[{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}]</span>
+                       <span className="truncate">{msg.text}</span>
+                    </div>
+                 ))}
+               </motion.div>
+             </div>
+           </div>
+        )}
+
         <button 
            onClick={() => { audioService.playKeystroke(); onFindConnection(); }}
            onMouseEnter={() => setActiveInfo('match')} 

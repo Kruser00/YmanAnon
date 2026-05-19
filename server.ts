@@ -545,6 +545,7 @@ async function startServer() {
           room.expiresAt += 2 * 60 * 1000;
           syncUserState(sId);
           io.to(user.currentRoom).emit('system_message', { text: `[PROTOCOL_OVERRIDE] > Memory decay delayed by node contribution (+2m)` });
+          io.to(user.currentRoom).emit('chat_timer_sync', { expiresAt: room.expiresAt });
           io.to(user.currentRoom).emit('timer_extended', { expiresAt: room.expiresAt });
        }
     });
@@ -577,7 +578,7 @@ async function startServer() {
       }
     });
 
-    socket.on('feature_unlocked', (data) => {
+    socket.on('unlock_feature', (data) => {
       const user = socketToUser.get(sId);
       if (user && user.currentRoom) {
         socket.to(user.currentRoom).emit('partner_unlocked_feature', data);

@@ -301,6 +301,7 @@ export default function App() {
                     onFindConnection={() => setAppState('FREQUENCY')} 
                     reputation={reputation} 
                     atmosphere={atmosphere} 
+                    voidMessages={voidMessages}
                   />
                 </motion.div>
               )}

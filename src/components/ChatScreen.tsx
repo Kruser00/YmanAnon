@@ -205,6 +205,17 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    return () => {
+      if (localStreamRef.current) {
+         localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (peerConnectionRef.current) {
+         peerConnectionRef.current.close();
+      }
+    };
+  }, []);
+
   const handleBoost = (messageId: string, type: string) => {
     audioService.playAlert();
     socketService.emit('boost_message', { roomId, messageId, type, nodeId });
