@@ -10,3 +10,4 @@ export * from './ChatBootSequence';
 export * from './ChatScreen';
 export * from './FrequencyTunerScreen';
 export * from './AuthScreen';
+export * from './ErrorBoundary';

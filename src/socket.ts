@@ -16,6 +16,16 @@ class SocketService {
         const callbacks = this.listeners.get(event) || [];
         callbacks.forEach(cb => cb(...args));
       });
+      
+      this.socket.on('connect', () => {
+         const callbacks = this.listeners.get('connect') || [];
+         callbacks.forEach(cb => cb());
+      });
+      
+      this.socket.on('disconnect', () => {
+         const callbacks = this.listeners.get('disconnect') || [];
+         callbacks.forEach(cb => cb());
+      });
     }
   }
 

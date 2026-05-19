@@ -68,8 +68,10 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     };
 
     socketService.on('chat_timer_sync', handleTimerSync);
+    socketService.on('timer_extended', handleTimerSync);
     return () => {
       socketService.off('chat_timer_sync', handleTimerSync);
+      socketService.off('timer_extended', handleTimerSync);
     };
   }, [roomId]);
 
@@ -410,7 +412,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     socketService.emit('typing', { isTyping: false });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
-    if (input.startsWith('/') && !input.startsWith('/accept ') && !input.startsWith('/decline ')) {
+    if (input.startsWith('/')) {
        const cmd = input.split(' ')[0];
        
        if (cmd === '/ping') {
@@ -434,15 +436,6 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
        }
        setInput('');
        return;
-    }
-
-    if (input.startsWith('/accept ')) {
-       const type = input.split(' ')[1];
-       if (type) {
-         socketService.emit('accept_reveal', { type });
-         setInput('');
-         return;
-       }
     }
 
     const newMsgId = Date.now().toString();

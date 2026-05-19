@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,13 +25,25 @@ db.exec(`
   )
 `);
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key_for_dev_only';
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+if (!process.env.JWT_SECRET) {
+  console.warn("WARNING: JWT_SECRET environment variable not set. Using random ephemeral key.");
+}
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   
   app.use(express.json()); // Add support for JSON bodies
+  app.use('/api/', apiLimiter); // Apply rate limiting to all /api/ routes
+
   
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
@@ -57,7 +70,14 @@ async function startServer() {
 
   app.post('/api/register', (req, res) => {
     const { username, password } = req.body;
-    if (!username || !password || username.length < 3) return res.status(400).json({ error: 'Invalid username or password' });
+    
+    if (!username || typeof username !== 'string' || username.length < 3 || username.length > 20 || !/^[a-zA-Z0-9_-]+$/.test(username)) {
+       return res.status(400).json({ error: 'Username must be 3-20 characters long and contain only alphanumeric characters, underscores, or hyphens.' });
+    }
+    
+    if (!password || typeof password !== 'string' || password.length < 6 || password.length > 100) {
+       return res.status(400).json({ error: 'Password must be between 6 and 100 characters.' });
+    }
     
     try {
       const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
@@ -76,7 +96,9 @@ async function startServer() {
 
   app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+    if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Username and password required' });
+    }
 
     try {
       const user: any = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -249,6 +271,7 @@ async function startServer() {
             currentRoom: null,
             lastPartnerId: null,
             lastAdClaimedAt: 0,
+            lastMessageAt: 0,
             isGuest
         };
         nodeToUser.set(nodeId, user);
@@ -263,6 +286,7 @@ async function startServer() {
     }
 
     // Link current socket
+    user.lastSocketId = user.socketId;
     user.socketId = socketId;
     socketToUser.set(socketId, user);
     return user;
@@ -275,16 +299,62 @@ async function startServer() {
     syncAtmosphere();
 
     socket.on('register_node', (data) => {
-      registerUser(sId, data);
+      const user = registerUser(sId, data);
       syncUserState(sId);
+      
+      if (user.currentRoom) {
+         const room = activeChats.get(user.currentRoom);
+         if (room) {
+            socket.join(user.currentRoom);
+            // Replace the old socketId in the room.users array with the new one
+            room.users = room.users.map((id: string) => id === user.lastSocketId ? sId : id);
+            
+            // Inform the partner that they returned
+            const partnerId = room.users.find((id: string) => id !== sId);
+            if (partnerId) {
+                io.to(partnerId).emit('system_message', { text: `[INFO] Partner node connection restored. / اتصال کاربر مقابل بازیابی شد.` });
+                
+                // Update their target to the new socket id
+                const partnerState = socketToUser.get(partnerId);
+                if (partnerState && partnerState.lastPartnerId === user.lastSocketId) {
+                   partnerState.lastPartnerId = sId;
+                }
+            }
+            
+            user.lastPartnerId = partnerId;
+            
+            socket.emit('rejoined_room', { 
+               roomId: user.currentRoom,
+               topic: room.topic
+            });
+         } else {
+            user.currentRoom = null;
+         }
+      }
     });
 
     socket.on('disconnect', () => {
       queue = queue.filter(u => u.socketId !== sId);
       const user = socketToUser.get(sId);
       socketToUser.delete(sId);
+      
       if (user && user.socketId === sId) {
-        if (user.currentRoom) terminateChat(user.currentRoom);
+        if (user.currentRoom) {
+           const room = activeChats.get(user.currentRoom);
+           if (room) {
+              const partnerId = room.users.find((id: string) => id !== sId);
+              if (partnerId) {
+                  io.to(partnerId).emit('system_message', { text: `[WARNING] Partner node lost connection. Waiting for reconnect... / هشدار: اتصال کاربر مقابل قطع شد. در انتظار اتصال مجدد...` });
+              }
+              // Set a timeout to terminate if they don't reconnect
+              setTimeout(() => {
+                 const currentUserState = nodeToUser.get(user.nodeId);
+                 if (currentUserState && currentUserState.currentRoom === user.currentRoom && !socketToUser.has(currentUserState.socketId)) {
+                     terminateChat(user.currentRoom);
+                 }
+              }, 30000); // 30 seconds grace period
+           }
+        }
       }
       syncAtmosphere();
     });
@@ -376,21 +446,33 @@ async function startServer() {
     socket.on('send_message', (data) => {
       const user = socketToUser.get(sId);
       if (user && user.currentRoom) {
+        const now = Date.now();
+        if (now - user.lastMessageAt < 500) {
+           return; // Rate limit: max 2 messages per second
+        }
+        user.lastMessageAt = now;
+
+        if (typeof data.text !== 'string' || data.text.length > 2000) return;
+        if (data.image && (typeof data.image !== 'string' || data.image.length > 5000000)) {
+           socket.emit('system_message', { text: 'SYS_ERR: Image payload too large. Max 3MB.' });
+           return;
+        }
+
         if (data.text.startsWith('/void ')) {
            const voidMsg = data.text.replace('/void ', '');
-           io.emit('void_broadcast', { text: voidMsg, timestamp: Date.now() });
+           io.emit('void_broadcast', { text: voidMsg.substring(0, 500), timestamp: now });
            socket.emit('system_message', { text: ">>> Message cast into the void. It is now part of the global noise. <<<" });
            return;
         }
 
-        const messageId = data.id || Date.now().toString();
+        const messageId = data.id || now.toString();
 
         socket.to(user.currentRoom).emit('receive_message', {
           id: messageId,
           sender: sId,
           text: data.text,
           image: data.image,
-          timestamp: Date.now()
+          timestamp: now
         });
 
         // Confirm delivery to sender

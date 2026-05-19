@@ -76,6 +76,7 @@ export class RetroAudio {
     const stepDuration = 60 / this.tempo / 2; // 8th notes
     
     const tick = () => {
+      if (!this.bgmStarted) return;
       if (this.isMuted) {
         this.sequencerTimer = setTimeout(tick, stepDuration * 1000);
         return;
@@ -93,6 +94,14 @@ export class RetroAudio {
     };
 
     tick();
+  }
+
+  stopSequencer() {
+    this.bgmStarted = false;
+    if (this.sequencerTimer) {
+      clearTimeout(this.sequencerTimer);
+      this.sequencerTimer = null;
+    }
   }
 
   playTone(freq: number, type: OscillatorType, volume: number, duration: number) {

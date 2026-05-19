@@ -76,6 +76,12 @@ export default function App() {
       setAppState('CHAT_BOOT');
     });
 
+    socketService.on('rejoined_room', (data: any) => {
+      setRoomId(data.roomId);
+      setTopic(data.topic);
+      setAppState('CHAT');
+    });
+
     socketService.on('chat_terminated', (data: any) => {
       setChatStats(data);
       setAppState('CHAT_STATS');
@@ -109,6 +115,7 @@ export default function App() {
 
     return () => {
       socketService.off('match_found');
+      socketService.off('rejoined_room');
       socketService.off('chat_terminated');
       socketService.off('void_broadcast');
       socketService.off('atmosphere_updated');
@@ -117,6 +124,16 @@ export default function App() {
       socketService.off('global_glitch');
     };
   }, []); // Only register once
+
+  useEffect(() => {
+    const handleConnect = () => {
+       if (nodeId && (appState === 'DASHBOARD' || appState === 'FREQUENCY' || appState === 'MATCHING' || appState === 'CHAT_BOOT' || appState === 'CHAT')) {
+          socketService.emit('register_node', { nodeId, profile, token });
+       }
+    };
+    socketService.on('connect', handleConnect);
+    return () => socketService.off('connect', handleConnect);
+  }, [nodeId, profile, token, appState]);
 
   useEffect(() => {
     if (appState === 'DASHBOARD' && nodeId) {
@@ -280,7 +297,7 @@ export default function App() {
 
               {appState === 'MATCHING' && (
                 <motion.div key="matching" exit={{ opacity: 0 }} className="h-full">
-                  <MatchingScreen onCancel={() => { socketService.emit('leave_pool', {}); setAppState('DASHBOARD'); }} />
+                  <MatchingScreen onCancel={() => { socketService.emit('leave_pool', {}); setAppState('DASHBOARD'); }} atmosphere={atmosphere} freq={frequency} />
                 </motion.div>
               )}
               

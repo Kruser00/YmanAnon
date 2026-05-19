@@ -8,8 +8,7 @@ export function AuthScreen({ onComplete }: { onComplete: (token?: string) => voi
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.lexical && e.preventDefault();
-    if (e.preventDefault) e.preventDefault();
+    e.preventDefault();
     setError('');
     
     if (!username || !password) {
