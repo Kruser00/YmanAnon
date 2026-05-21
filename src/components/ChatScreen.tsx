@@ -17,7 +17,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const [timerExpiresAt, setTimerExpiresAt] = useState<number | null>(null);
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
-  
+
   // Voice & Video state
   const [voiceUnlocked, setVoiceUnlocked] = useState(false);
   const [videoUnlocked, setVideoUnlocked] = useState(false);
@@ -27,16 +27,16 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const [partnerVideoUnlocked, setPartnerVideoUnlocked] = useState(false);
   const [callActive, setCallActive] = useState(false);
   const [incomingCall, setIncomingCall] = useState<any>(null);
-  
+
   const isVoiceAvailable = voiceUnlocked || partnerVoiceUnlocked;
   const isVideoAvailable = videoUnlocked || partnerVideoUnlocked;
-  
+
   const iceCandidateQueue = useRef<any[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const typeSoundIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -44,6 +44,14 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
   const emojis = ['🔥', '👍', '❤️', '😂', '😮', '💀'];
+
+  const spendPoints = async (type: string) => {
+    const result = await socketService.emitWithAck<{ ok: boolean; error?: string }>('spend_points', { type });
+    if (!result.ok) {
+      setMessages(prev => [...prev, { id: Date.now().toString(), text: `SYS_ERR: ${result.error || 'SPEND_REJECTED'}`, isSelf: false, system: true }]);
+    }
+    return result.ok;
+  };
 
   useEffect(() => {
      if (partnerTyping) {
@@ -54,7 +62,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
      } else {
         if (typeSoundIntervalRef.current) clearInterval(typeSoundIntervalRef.current);
      }
-     
+
      return () => {
          if (typeSoundIntervalRef.current) clearInterval(typeSoundIntervalRef.current);
      }
@@ -62,7 +70,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
   useEffect(() => {
     if (!roomId) return;
-    
+
     const handleTimerSync = (data: any) => {
        setTimerExpiresAt(data.expiresAt);
     };
@@ -128,7 +136,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     const handlePartnerTyping = (data: { isTyping: boolean }) => {
       setPartnerTyping(data.isTyping);
       if (data.isTyping) {
-        // play subtle background typing sound? We can just use playKeystroke at lower volume or something. 
+        // play subtle background typing sound? We can just use playKeystroke at lower volume or something.
         // We'll leave it visual for now to avoid annoyance, maybe just a very muted glitch.
       }
     };
@@ -216,22 +224,33 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
     };
   }, []);
 
-  const handleBoost = (messageId: string, type: string) => {
+  const handleBoost = async (messageId: string, type: string) => {
     audioService.playAlert();
-    socketService.emit('boost_message', { roomId, messageId, type, nodeId });
+    const result = await socketService.emitWithAck<{ ok: boolean; error?: string }>('boost_message', { roomId, messageId, type, nodeId });
+    if (!result.ok) {
+      setMessages(prev => [...prev, { id: Date.now().toString(), text: `SYS_ERR: ${result.error || 'BOOST_REJECTED'}`, isSelf: false, system: true }]);
+    }
   };
 
   const initWebRTC = async (withVideo: boolean) => {
     try {
+      const turnUrl = import.meta.env.VITE_TURN_URL;
+      const iceServers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+      if (turnUrl) {
+        iceServers.push({
+          urls: turnUrl,
+          username: import.meta.env.VITE_TURN_USERNAME || undefined,
+          credential: import.meta.env.VITE_TURN_CREDENTIAL || undefined
+        });
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
       localStreamRef.current = stream;
       if (localVideoRef.current && withVideo) {
          localVideoRef.current.srcObject = stream;
       }
-      
-      const peerConnection = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
+
+      const peerConnection = new RTCPeerConnection({ iceServers });
       peerConnectionRef.current = peerConnection;
 
       stream.getTracks().forEach(track => {
@@ -314,18 +333,18 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
      }
   };
 
-  const unlockVoice = () => {
+  const unlockVoice = async () => {
     if (points < 500) return;
+    if (!(await spendPoints('voice'))) return;
     onPointsSpent(500, 'Unlock Voice Channel');
     setVoiceUnlocked(true);
-    socketService.emit('unlock_feature', { feature: 'voice' });
   };
 
-  const unlockVideo = () => {
+  const unlockVideo = async () => {
     if (points < 1000) return;
+    if (!(await spendPoints('video'))) return;
     onPointsSpent(1000, 'Unlock Video Channel');
     setVideoUnlocked(true);
-    socketService.emit('unlock_feature', { feature: 'video' });
   };
 
   const startVoiceCall = () => {
@@ -334,6 +353,21 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
   const startVideoCall = () => {
     initWebRTC(true);
+  };
+
+  const reportPartner = async () => {
+    const reason = window.prompt('Report reason');
+    if (!reason) return;
+    const result = await socketService.emitWithAck<{ ok: boolean; error?: string }>('report_partner', { reason });
+    setMessages(prev => [...prev, { id: Date.now().toString(), text: result.ok ? 'REPORT_TRANSMITTED.' : `SYS_ERR: ${result.error || 'REPORT_FAILED'}`, isSelf: false, system: true }]);
+  };
+
+  const blockPartner = async () => {
+    if (!window.confirm('Block this partner and end the chat?')) return;
+    const result = await socketService.emitWithAck<{ ok: boolean; error?: string }>('block_partner', {});
+    if (!result.ok) {
+      setMessages(prev => [...prev, { id: Date.now().toString(), text: `SYS_ERR: ${result.error || 'BLOCK_FAILED'}`, isSelf: false, system: true }]);
+    }
   };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -373,8 +407,10 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
            const base64 = canvas.toDataURL('image/jpeg', 0.8);
            const currentText = input.trim();
-           
-           onPointsSpent(50, 'Send Encrypted Image');
+
+           spendPoints('image').then(ok => {
+             if (!ok) return;
+             onPointsSpent(50, 'Send Encrypted Image');
            const newMsgId = Date.now().toString();
            const newMsg = { id: newMsgId, text: currentText, image: base64, isSelf: true, status: 'sent' as const };
            audioService.playMessageSent();
@@ -382,6 +418,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
            setInput('');
            if (fileInputRef.current) fileInputRef.current.value = '';
            socketService.emit('send_message', { roomId, id: newMsgId, text: currentText, image: base64 });
+           });
         };
         img.src = event.target?.result as string;
      };
@@ -407,7 +444,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
        audioService.playKeystroke();
     }
     setInput(e.target.value);
-    
+
     socketService.emit('typing', { isTyping: e.target.value.length > 0 });
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -419,13 +456,13 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
-    
+
     socketService.emit('typing', { isTyping: false });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     if (input.startsWith('/')) {
        const cmd = input.split(' ')[0];
-       
+
        if (cmd === '/ping') {
           const msg = { id: `sys-loc-${Date.now()}`, text: `PONG: ${Math.floor(Math.random() * 50) + 10}ms`, isSelf: false, system: true };
           setMessages(prev => [...prev, msg]);
@@ -469,7 +506,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       {secondsRemaining !== null && secondsRemaining < 10 && secondsRemaining % 2 === 0 && (
          <div className="absolute inset-0 bg-red-900/10 pointer-events-none z-50" />
       )}
-      
+
       {/* Top Header */}
       <div className="flex justify-between items-center border-b-2 border-[var(--phos-color)] p-3 sm:p-4 z-30 bg-black/90 shadow-[0_10px_20px_rgba(0,0,0,0.8)]">
         <div className="flex items-center gap-4">
@@ -485,7 +522,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                      {Math.floor(secondsRemaining / 60)}:{Math.floor(secondsRemaining % 60).toString().padStart(2, '0')}
                    </span>
                  </div>
-                 <button 
+                 <button
                    onClick={handleProlong}
                    disabled={points < 200}
                    className="bg-yellow-500/10 border border-yellow-500/40 text-yellow-500 text-[9px] sm:text-[10px] px-2 py-1 uppercase hover:bg-yellow-500/20 disabled:opacity-30 transition-all font-bold ml-2 tracking-widest hover:shadow-[0_0_10px_rgba(234,179,8,0.5)]"
@@ -497,8 +534,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
            </div>
         </div>
 
-        <button 
-          onClick={() => { audioService.playKeystroke(); socketService.emit('leave_pool', {}); }} 
+        <button
+          onClick={() => { audioService.playKeystroke(); socketService.emit('leave_pool', {}); }}
           className="p-1 px-3 sm:px-4 hover:bg-red-500/20 text-[10px] sm:text-[11px] font-mono uppercase tracking-widest border border-red-500/50 text-red-500 flex flex-col items-center transition-colors bg-red-500/5 hover:shadow-[inset_0_0_15px_rgba(255,0,0,0.5)]"
         >
             <span>DISCONNECT</span>
@@ -508,8 +545,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
 
       {/* Identity Store / Actions Sidebar */}
       <div className="border-b border-[var(--phos-color)]/20 p-2 flex gap-2 sm:gap-4 overflow-x-auto whitespace-nowrap text-[10px] sm:text-xs scrollbar-hide relative z-20 bg-black/20 items-center">
-        <button 
-          onClick={unlockVoice}
+	        <button
+	          onClick={unlockVoice}
           disabled={voiceUnlocked || points < 500}
           className="border border-[var(--phos-color)]/30 px-2 sm:px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex flex-col items-center group whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed"
           title="Cost: 500 pts"
@@ -519,7 +556,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
            </div>
            <span className="font-sans text-[8px] opacity-70">صدا</span>
         </button>
-        <button 
+        <button
           onClick={unlockVideo}
           disabled={videoUnlocked || points < 1000}
           className="border border-[var(--phos-color)]/30 px-2 sm:px-3 py-1 hover:bg-[var(--phos-color)]/10 hover:text-white transition-colors flex flex-col items-center group whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed"
@@ -529,9 +566,23 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
              <span>Video (1000)</span>
            </div>
            <span className="font-sans text-[8px] opacity-70">تصویر</span>
+	        </button>
+        <button
+          onClick={reportPartner}
+          className="border border-yellow-500/30 text-yellow-500 px-2 sm:px-3 py-1 hover:bg-yellow-500/10 transition-colors flex flex-col items-center whitespace-nowrap"
+        >
+          <span>Report</span>
+          <span className="font-sans text-[8px] opacity-70">گزارش</span>
         </button>
-        
-      </div>
+        <button
+          onClick={blockPartner}
+          className="border border-red-500/30 text-red-500 px-2 sm:px-3 py-1 hover:bg-red-500/10 transition-colors flex flex-col items-center whitespace-nowrap"
+        >
+          <span>Block</span>
+          <span className="font-sans text-[8px] opacity-70">مسدود</span>
+        </button>
+
+	      </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2 sm:space-y-4 relative z-10 scrollbar-hide pb-10 bg-black/40">
@@ -544,7 +595,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             className={cn(
                "max-w-[85%] sm:max-w-[75%] break-words p-3 sm:p-4 mb-4 relative group will-change-[opacity,transform] backdrop-blur-sm shadow-sm",
                m.system ? "mx-auto text-center border-y border-[var(--phos-color)]/30 text-[10px] sm:text-xs text-[var(--phos-color)] uppercase max-w-full my-4 sm:my-6 phosphor-dim bg-black/40 shadow-none border-x-4 border-x-[var(--phos-color)]/20" :
-               m.isSelf ? "ml-auto border border-[var(--phos-color)]/30 bg-[var(--phos-color)]/10 text-[var(--phos-color)] shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] border-l-4 border-l-[var(--phos-color)]" : 
+               m.isSelf ? "ml-auto border border-[var(--phos-color)]/30 bg-[var(--phos-color)]/10 text-[var(--phos-color)] shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] border-l-4 border-l-[var(--phos-color)]" :
                "mr-auto border border-[var(--phos-color)]/20 bg-black/80 text-[var(--phos-color)]/90 shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] border-r-4 border-r-[var(--phos-color)]/50",
                m.boost === 'highlight' ? "shadow-[0_0_20px_var(--phos-color)] border-[var(--phos-color)] phosphor-glow bg-[var(--phos-color)]/20" : "",
                m.boost === 'glitch' ? "fx-jitter" : "",
@@ -563,7 +614,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                </div>
             )}
             <span className={cn(
-              "font-fa", 
+              "font-fa",
               m.system ? "font-mono" : "text-[13px] sm:text-base leading-relaxed text-start block w-full",
               m.boost === 'redact' ? "select-none" : ""
             )}>
@@ -575,8 +626,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             {m.isSelf && !m.system && (
                <div className="flex items-center gap-1 absolute -bottom-5 right-0 text-[10px] font-mono opacity-60 uppercase tracking-tighter">
                  <span className="opacity-50">
-                   {new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) !== "Invalid Date" 
-                      ? new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                   {new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) !== "Invalid Date"
+                      ? new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                       : ""}
                  </span>
                  {m.status === 'sent' && <span>[+]</span>}
@@ -587,8 +638,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
             {!m.isSelf && !m.system && (
                <div className="flex items-center gap-1 absolute -bottom-5 left-0 text-[10px] font-mono opacity-50 uppercase tracking-tighter">
                  <span>
-                   {new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) !== "Invalid Date" 
-                      ? new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                   {new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) !== "Invalid Date"
+                      ? new Date(parseInt(m.id)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                       : ""}
                  </span>
                </div>
@@ -613,13 +664,13 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                 m.isSelf ? "right-0" : "left-0"
               )}>
                 {/* Emoji Trigger */}
-                <button 
-                  onClick={() => setShowEmojiPicker(showEmojiPicker === m.id ? null : m.id)} 
+                <button
+                  onClick={() => setShowEmojiPicker(showEmojiPicker === m.id ? null : m.id)}
                   className="text-[8px] uppercase px-1 hover:bg-[var(--phos-color)]/20"
                 >
                   React / واکنش
                 </button>
-                
+
                 {/* Boost Controls for self messages */}
                 {m.isSelf && !m.boost && (
                   <>
@@ -638,8 +689,8 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                 m.isSelf ? "right-0" : "left-0"
               )}>
                 {emojis.map(e => (
-                  <button 
-                    key={e} 
+                  <button
+                    key={e}
                     onClick={() => handleReaction(m.id, e)}
                     className="hover:scale-125 transition-transform p-1"
                   >
@@ -653,9 +704,9 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
         })}
 
         {partnerTyping && (
-          <motion.div 
-            initial={{ opacity: 0, x: -10 }} 
-            animate={{ opacity: 1, x: 0 }} 
+          <motion.div
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0 }}
             className="text-[10px] sm:text-xs font-mono text-[var(--phos-color)]/70 uppercase ml-4 mt-2 flex items-center gap-3 backdrop-blur-sm bg-black/40 p-2 border-l-2 border-[var(--phos-color)]/50 w-fit"
           >
@@ -669,7 +720,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
              </div>
           </motion.div>
         )}
-        
+
         {/* WebRTC Overlays */}
         {(isVoiceActive || callActive) && (
           <div className="border-2 border-[var(--phos-color)] bg-black/90 my-6 p-4 relative flex flex-wrap gap-6 justify-center items-center shadow-[0_0_20px_rgba(0,0,0,0.9)] max-w-2xl mx-auto rounded-sm">
@@ -706,7 +757,7 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
         {/* Start Call UI if unlocked */}
         {!callActive && isVoiceAvailable && (
            <div className="flex justify-center p-2 mb-2 w-full max-w-sm mx-auto">
-              <button 
+              <button
                 onClick={startVoiceCall}
                 className="w-full border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-3 flex flex-col items-center justify-center hover:bg-[var(--phos-color)]/30 transition-all hover:shadow-[0_0_15px_var(--phos-color)]"
               >
@@ -715,10 +766,10 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
               </button>
            </div>
         )}
-        
+
         {!callActive && isVideoAvailable && (
            <div className="flex justify-center p-2 mb-6 w-full max-w-sm mx-auto">
-              <button 
+              <button
                 onClick={startVideoCall}
                 className="w-full border border-[var(--phos-color)] bg-[var(--phos-color)]/10 text-[var(--phos-color)] px-4 py-3 flex flex-col items-center justify-center hover:bg-[var(--phos-color)]/30 transition-all hover:shadow-[0_0_15px_var(--phos-color)]"
               >
@@ -734,14 +785,14 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
                  Incoming {incomingCall.withVideo ? 'Video' : 'Voice'} Transmission...
               </div>
               <div className="flex gap-4 w-full px-4">
-                 <button 
+                 <button
                    onClick={acceptCall}
                    className="border border-[var(--phos-color)] px-4 py-2 hover:bg-[var(--phos-color)]/20 font-mono text-xs uppercase flex-1 flex flex-col justify-center items-center gap-1 transition-colors"
                  >
                    <span>Accept</span>
                    <span className="font-sans">پذیرش</span>
                  </button>
-                 <button 
+                 <button
                    onClick={() => setIncomingCall(null)}
                    className="border border-red-500/50 text-red-500/80 px-4 py-2 hover:bg-red-500/20 font-mono text-xs uppercase flex-1 flex flex-col justify-center items-center gap-1 transition-colors"
                  >
@@ -765,11 +816,11 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
       {/* Input Base */}
       <form onSubmit={sendMessage} className="border-t-2 border-[var(--phos-color)]/50 p-2 sm:p-3 flex bg-black relative z-20 items-center shadow-[0_-10px_20px_rgba(0,0,0,0.8)]">
         <label className="cursor-pointer pl-2 pr-1 opacity-80 hover:opacity-100 transition-opacity flex items-center justify-center group relative overflow-visible flex-shrink-0">
-          <input 
-            type="file" 
-            accept="image/*" 
+          <input
+            type="file"
+            accept="image/*"
             onChange={handleImageSelect}
-            className="hidden" 
+            className="hidden"
             ref={fileInputRef}
           />
           <div className="flex items-center justify-center border border-[var(--phos-color)] text-[var(--phos-color)] bg-[var(--phos-color)]/10 group-hover:bg-[var(--phos-color)] px-2 py-1 gap-1 transition-all h-10">
@@ -785,15 +836,15 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
              <span className="opacity-80">Self-destruct: 30s</span>
           </div>
         </label>
-        
+
         <div className="flex flex-col flex-1 mx-2 relative">
            <div className="absolute -top-3 left-2 text-[8px] sm:text-[9px] font-mono text-[var(--phos-color)]/70 uppercase tracking-widest bg-black px-1">
               TERMINAL_INPUT_STREAM
            </div>
            <div className="flex items-center border border-[var(--phos-color)]/30 bg-[var(--phos-color)]/5 h-10 px-3 relative">
              <span className="animate-pulse mr-2 font-mono font-bold text-[var(--phos-color)]">{'>'}</span>
-             <input 
-               type="text" 
+             <input
+               type="text"
                value={input}
                onChange={handleInputChange}
                className="flex-1 bg-transparent border-none outline-none text-[var(--phos-color)] phosphor-glow font-fa text-sm sm:text-base focus:ring-0 min-w-0"
@@ -805,17 +856,17 @@ export function ChatScreen({ topic, roomId, points, onPointsSpent, nodeId }: { t
            </div>
         </div>
 
-        <button 
-          type="button" 
+        <button
+          type="button"
           className="text-[10px] border border-[var(--phos-color)]/30 px-2 py-1 rounded-sm hover:bg-[var(--phos-color)]/20 mr-2 self-center font-mono h-10 flex items-center transition-colors"
           title="Terminal Commands: /help, /ping, /roll, /whoami, /clear"
           onClick={() => setInput('/help')}
         >
           /CMD
         </button>
-        <button 
-          type="submit" 
-          disabled={!input.trim()} 
+        <button
+          type="submit"
+          disabled={!input.trim()}
           className="h-10 px-4 sm:px-6 bg-[var(--phos-color)]/10 border border-[var(--phos-color)] text-[var(--phos-color)] flex items-center justify-center hover:bg-[var(--phos-color)] hover:text-black hover:shadow-[0_0_15px_var(--phos-color)] transition-all disabled:opacity-30 disabled:hover:bg-[var(--phos-color)]/10 disabled:hover:text-[var(--phos-color)] disabled:hover:shadow-none uppercase text-[10px] sm:text-xs font-bold font-mono tracking-widest"
         >
           <span>EXEC</span>

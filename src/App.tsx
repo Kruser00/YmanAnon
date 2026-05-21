@@ -3,15 +3,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import { socketService } from './socket';
 import { audioService } from './audio';
 import { Terminal, Cpu, Heart, Coins, Volume2, VolumeX, Monitor } from 'lucide-react';
-import { 
-  BackgroundCode, 
-  BootSequence, 
-  ProfileSetupScreen, 
-  DashboardScreen, 
-  MatchingScreen, 
-  ChatBootSequence, 
-  ChatScreen, 
-  ConversationStatsScreen, 
+import {
+  BackgroundCode,
+  BootSequence,
+  ProfileSetupScreen,
+  DashboardScreen,
+  MatchingScreen,
+  ChatBootSequence,
+  ChatScreen,
+  ConversationStatsScreen,
   RatingScreen,
   FrequencyTunerScreen,
   AuthScreen,
@@ -53,14 +53,40 @@ export default function App() {
     if (savedToken) {
       setToken(savedToken);
       const savedUsername = localStorage.getItem('phos_username');
-      if (savedUsername) setNodeId(savedUsername);
-    }
-
-    const savedProfile = localStorage.getItem(`profile_${savedId}`);
-    if (savedProfile) {
-      try {
-        setProfile(JSON.parse(savedProfile));
-      } catch (e) {}
+      if (savedUsername) {
+        setNodeId(savedUsername);
+        const savedUserProfile = localStorage.getItem(`profile_${savedUsername}`);
+        if (savedUserProfile) {
+          try {
+            setProfile(JSON.parse(savedUserProfile));
+          } catch (e) {}
+        }
+        fetch('/api/me', { headers: { Authorization: `Bearer ${savedToken}` } })
+          .then(res => {
+            if (res.ok) return res.json();
+            localStorage.removeItem('phos_token');
+            localStorage.removeItem('phos_username');
+            setToken(null);
+            return null;
+          })
+          .then(data => {
+            if (!data) return;
+            if (data.points !== undefined) setPoints(data.points);
+            if (data.reputation) setReputation(data.reputation);
+            if (data.profile) {
+              setProfile(data.profile);
+              localStorage.setItem(`profile_${savedUsername}`, JSON.stringify(data.profile));
+            }
+          })
+          .catch(() => {});
+      }
+    } else {
+      const savedProfile = localStorage.getItem(`profile_${savedId}`);
+      if (savedProfile) {
+        try {
+          setProfile(JSON.parse(savedProfile));
+        } catch (e) {}
+      }
     }
   }, []);
 
@@ -111,7 +137,7 @@ export default function App() {
       if (data.points !== undefined) setPoints(data.points);
       if (data.reputation !== undefined) setReputation(data.reputation);
     });
-    
+
     socketService.on('global_glitch', (data: any) => {
       setIsGlitching(true);
       if (!isMuted) {
@@ -184,6 +210,41 @@ export default function App() {
     }
   }, [profile]);
 
+  const persistProfile = async (p: typeof profile) => {
+    setProfile(p);
+    const key = localStorage.getItem('phos_username') || nodeId;
+    if (key) localStorage.setItem(`profile_${key}`, JSON.stringify(p));
+    if (token) {
+      await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ profile: p })
+      }).catch(() => {});
+    }
+    setAppState('DASHBOARD');
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/session', { method: 'POST' }).catch(() => {});
+    localStorage.removeItem('phos_token');
+    localStorage.removeItem('phos_username');
+    setToken(null);
+    setPoints(0);
+    setReputation({ positive: 0, negative: 0 });
+    setAppState('AUTH');
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!token || !window.confirm('Delete this account permanently?')) return;
+    await fetch('/api/account', { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    localStorage.removeItem('phos_token');
+    localStorage.removeItem('phos_username');
+    setToken(null);
+    setPoints(0);
+    setReputation({ positive: 0, negative: 0 });
+    setAppState('AUTH');
+  };
+
   const toggleTheme = () => {
     setTheme(prev => {
       if (prev === 'green') return 'amber';
@@ -197,7 +258,7 @@ export default function App() {
     const muted = audioService.toggleMute();
     setIsMuted(muted);
     if (!muted) {
-       audioService.startBGM(); 
+       audioService.startBGM();
     }
   };
 
@@ -208,7 +269,7 @@ export default function App() {
       <div className="crt-bottom-fade" />
       <div className="crt-curve h-full w-full relative flex flex-col">
         <BackgroundCode mood={mood} />
-        
+
         {!isConnected && (
           <div className="absolute top-0 left-0 w-full bg-red-600/80 text-white font-mono text-center py-2 z-50 text-xs sm:text-sm animate-pulse flex flex-col items-center justify-center border-b border-red-500">
              <span className="font-bold tracking-widest">CONNECTION LOST / قطعی ارتباط</span>
@@ -230,7 +291,7 @@ export default function App() {
                 <span className="hidden sm:inline border-l border-[var(--phos-color)]/30 pl-3 uppercase">Sec_Mesh_Active</span>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-3 sm:gap-6">
               {appState !== 'BOOT' && appState !== 'START' && (
                 <>
@@ -241,7 +302,7 @@ export default function App() {
                     </div>
                     <div className="text-[7px] uppercase tracking-tighter opacity-50 font-mono">SIGNAL_FUEL</div>
                   </div>
-                  
+
                   <div className="hidden xs:flex flex-col items-end border-l border-[var(--phos-color)]/20 pl-3 sm:pl-4">
                     <div className="flex items-center gap-1.5 text-red-500">
                       <Heart size={14} />
@@ -282,28 +343,27 @@ export default function App() {
                   <AuthScreen onComplete={onAuthComplete} />
                 </motion.div>
               )}
-              
+
               {appState === 'PROFILE' && (
                 <motion.div key="profile" exit={{ opacity: 0 }} className="h-full">
-                  <ProfileSetupScreen 
+                  <ProfileSetupScreen
                     initialProfile={profile}
-                    onComplete={(p) => { 
-                      setProfile(p); 
-                      localStorage.setItem(`profile_${nodeId}`, JSON.stringify(p));
-                      setAppState('DASHBOARD'); 
-                    }} 
+                    onComplete={persistProfile}
                   />
                 </motion.div>
               )}
 
               {appState === 'DASHBOARD' && (
                 <motion.div key="dashboard" exit={{ opacity: 0 }} className="h-full">
-                  <DashboardScreen 
-                    onFindConnection={() => setAppState('FREQUENCY')} 
-                    onDataMine={() => setAppState('DATA_MINE')}
-                    reputation={reputation} 
-                    atmosphere={atmosphere} 
-                    voidMessages={voidMessages}
+	                  <DashboardScreen
+	                    onFindConnection={() => setAppState('FREQUENCY')}
+	                    onDataMine={() => setAppState('DATA_MINE')}
+                      onEditProfile={() => setAppState('PROFILE')}
+                      onLogout={handleLogout}
+                      onDeleteAccount={token ? handleDeleteAccount : undefined}
+	                    reputation={reputation}
+	                    atmosphere={atmosphere}
+	                    voidMessages={voidMessages}
                   />
                 </motion.div>
               )}
@@ -325,7 +385,7 @@ export default function App() {
                   <MatchingScreen onCancel={() => { socketService.emit('leave_pool', {}); setAppState('DASHBOARD'); }} atmosphere={atmosphere} freq={frequency} />
                 </motion.div>
               )}
-              
+
               {appState === 'CHAT_BOOT' && (
                 <motion.div key="chatboot" exit={{ opacity: 0 }} className="h-full">
                   <ChatBootSequence onComplete={() => setAppState('CHAT')} />
@@ -334,7 +394,7 @@ export default function App() {
 
               {appState === 'CHAT' && (
                 <motion.div key="chat" exit={{ opacity: 0 }} className="h-full">
-                  <ChatScreen topic={topic || ""} roomId={roomId!} points={points} nodeId={nodeId || ""} onPointsSpent={(cost, type) => { audioService.playKeystroke(); socketService.emit('propose_reveal', { cost, type: type.toLowerCase() }); }} />
+	                  <ChatScreen topic={topic || ""} roomId={roomId!} points={points} nodeId={nodeId || ""} onPointsSpent={() => { audioService.playKeystroke(); }} />
                 </motion.div>
               )}
 

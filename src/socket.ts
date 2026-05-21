@@ -9,6 +9,7 @@ class SocketService {
       // Connect to the same host that serves the Vite app
       this.socket = io(window.location.origin, {
          path: '/socket.io',
+         auth: { token: localStorage.getItem('phos_token') || undefined },
       });
 
       // Pass through events
@@ -48,6 +49,19 @@ class SocketService {
     if (this.socket) {
       this.socket.emit(event, ...args);
     }
+  }
+
+  emitWithAck<T = any>(event: string, ...args: any[]): Promise<T> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) {
+        reject(new Error('Socket is not connected'));
+        return;
+      }
+      this.socket.timeout(5000).emit(event, ...args, (err: Error | null, response: T) => {
+        if (err) reject(err);
+        else resolve(response);
+      });
+    });
   }
 }
 
