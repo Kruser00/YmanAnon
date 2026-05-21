@@ -46,6 +46,9 @@ export function AuthScreen({ onComplete }: { onComplete: (token?: string) => voi
       } else {
          localStorage.setItem('phos_token', data.token);
          localStorage.setItem('phos_username', data.username);
+         if (data.profile) {
+           localStorage.setItem(`profile_${data.username}`, JSON.stringify(data.profile));
+         }
          onComplete(data.token);
       }
     } catch (err) {

@@ -21,9 +21,27 @@ db.exec(`
     points INTEGER DEFAULT 200,
     reputation_positive INTEGER DEFAULT 0,
     reputation_negative INTEGER DEFAULT 0,
+    profile_json TEXT DEFAULT '{}',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS reports (
+    id TEXT PRIMARY KEY,
+    reporter_id TEXT,
+    reported_id TEXT,
+    reason TEXT,
+    room_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS blocks (
+    blocker_id TEXT,
+    blocked_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (blocker_id, blocked_id)
   )
 `);
+try {
+  db.prepare("ALTER TABLE users ADD COLUMN profile_json TEXT DEFAULT '{}'").run();
+} catch {}
 
 import winston from 'winston';
 
@@ -44,6 +62,9 @@ const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('he
 if (!process.env.JWT_SECRET) {
   logger.warn("JWT_SECRET environment variable not set. Using random ephemeral key.");
 }
+if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
+  throw new Error("JWT_SECRET is required in production");
+}
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -51,6 +72,47 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+const socketEventLimits = new Map<string, { count: number; resetAt: number }>();
+const SPEND_COSTS: Record<string, number> = {
+  voice: 500,
+  video: 1000,
+  image: 50,
+  boost_highlight: 50,
+  boost_glitch: 150,
+  boost_redact: 200,
+};
+const MINING_REWARD = 50;
+const MINING_COOLDOWN_MS = 15_000;
+
+const sanitizeProfile = (profile: any = {}) => {
+  const clean: Record<string, string> = {};
+  for (const key of ['name', 'age', 'gender', 'city', 'music', 'hobby', 'mbti']) {
+    const value = typeof profile[key] === 'string' ? profile[key].trim() : '';
+    clean[key] = value.slice(0, 80);
+  }
+  return clean;
+};
+
+const parseProfile = (value: any) => {
+  try {
+    return value ? JSON.parse(value) : {};
+  } catch {
+    return {};
+  }
+};
+
+const isSocketRateLimited = (socketId: string, event: string, max: number, windowMs: number) => {
+  const key = `${socketId}:${event}`;
+  const now = Date.now();
+  const current = socketEventLimits.get(key);
+  if (!current || current.resetAt <= now) {
+    socketEventLimits.set(key, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  current.count++;
+  return current.count > max;
+};
 
 async function startServer() {
   const app = express();
@@ -103,7 +165,7 @@ async function startServer() {
       db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').run(id, username, hash);
       
       const token = jwt.sign({ id, username }, JWT_SECRET, { expiresIn: '7d' });
-      res.json({ token, id, username, points: 200, reputation: { positive: 0, negative: 0 } });
+      res.json({ token, id, username, points: 200, reputation: { positive: 0, negative: 0 }, profile: {} });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -129,7 +191,8 @@ async function startServer() {
         id: user.id, 
         username: user.username, 
         points: user.points, 
-        reputation: { positive: user.reputation_positive, negative: user.reputation_negative } 
+        reputation: { positive: user.reputation_positive, negative: user.reputation_negative },
+        profile: parseProfile(user.profile_json)
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -145,8 +208,51 @@ async function startServer() {
         id: user.id, 
         username: user.username, 
         points: user.points, 
-        reputation: { positive: user.reputation_positive, negative: user.reputation_negative } 
+        reputation: { positive: user.reputation_positive, negative: user.reputation_negative },
+        profile: parseProfile(user.profile_json)
       });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/profile', authenticateToken, (req: any, res: any) => {
+    try {
+      const profile = sanitizeProfile(req.body?.profile);
+      db.prepare('UPDATE users SET profile_json = ? WHERE id = ?').run(JSON.stringify(profile), req.user.id);
+      res.json({ profile });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/password/change', authenticateToken, (req: any, res: any) => {
+    const { currentPassword, newPassword } = req.body || {};
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || newPassword.length < 6 || newPassword.length > 100) {
+      return res.status(400).json({ error: 'Current password and a 6-100 character new password are required' });
+    }
+
+    try {
+      const user: any = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+      if (!user || !bcrypt.compareSync(currentPassword, user.password_hash)) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), req.user.id);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/session', (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.delete('/api/account', authenticateToken, (req: any, res: any) => {
+    try {
+      db.prepare('DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?').run(req.user.id, req.user.id);
+      db.prepare('DELETE FROM users WHERE id = ?').run(req.user.id);
+      res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -202,12 +308,26 @@ async function startServer() {
 
   // Helper matching logic
   const findMatch = (userId: string, freq: string) => {
+    const requestingUser = socketToUser.get(userId);
+    const canMatch = (candidate: any) => {
+      const candidateUser = socketToUser.get(candidate.socketId);
+      if (!requestingUser || !candidateUser) return false;
+      if (requestingUser.nodeId === candidateUser.nodeId) return false;
+      const blocked = db.prepare('SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)').get(
+        requestingUser.nodeId,
+        candidateUser.nodeId,
+        candidateUser.nodeId,
+        requestingUser.nodeId
+      );
+      return !blocked;
+    };
+
     // Exact match on freq
-    let matchIndex = queue.findIndex(u => u.socketId !== userId && u.freq === freq);
+    let matchIndex = queue.findIndex(u => u.socketId !== userId && u.freq === freq && canMatch(u));
     
     // Ultimate Fallback: match any
     if (matchIndex === -1) {
-       matchIndex = queue.findIndex(u => u.socketId !== userId);
+       matchIndex = queue.findIndex(u => u.socketId !== userId && canMatch(u));
     }
 
     if (matchIndex > -1) {
@@ -281,12 +401,14 @@ async function startServer() {
             nodeId,
             points: isGuest ? 200 : (dbUser ? dbUser.points : 200),
             reputation: isGuest ? { positive: 0, negative: 0 } : (dbUser ? { positive: dbUser.reputation_positive, negative: dbUser.reputation_negative } : { positive: 0, negative: 0 }),
-            profile: data.profile || {},
+            profile: dbUser ? parseProfile(dbUser.profile_json) : sanitizeProfile(data.profile || {}),
             freq: data.freq || null,
             currentRoom: null,
             lastPartnerId: null,
             lastAdClaimedAt: 0,
             lastMessageAt: 0,
+            unlocked: {},
+            blocked: new Set<string>(),
             isGuest
         };
         nodeToUser.set(nodeId, user);
@@ -297,7 +419,8 @@ async function startServer() {
             user.points = dbUser.points;
             user.reputation = { positive: dbUser.reputation_positive, negative: dbUser.reputation_negative };
         }
-        if (data.profile) user.profile = { ...user.profile, ...data.profile };
+        if (data.profile) user.profile = { ...user.profile, ...sanitizeProfile(data.profile) };
+        if (!isGuest && dbUser) user.profile = parseProfile(dbUser.profile_json);
     }
 
     // Link current socket
@@ -310,10 +433,33 @@ async function startServer() {
   io.on('connection', (socket) => {
     logger.info(`[RAM_STORAGE] Terminal connect: ${socket.id}`);
     const sId = socket.id;
+    const socketToken = typeof socket.handshake.auth?.token === 'string' ? socket.handshake.auth.token : null;
+    let socketAuthUser: any = null;
+    if (socketToken) {
+      try {
+        socketAuthUser = jwt.verify(socketToken, JWT_SECRET);
+      } catch {
+        socket.emit('system_message', { text: 'SYS_ERR: Invalid socket auth token.' });
+      }
+    }
 
     syncAtmosphere();
 
+    socket.use(([event], next) => {
+      const fastEvents = new Set(['send_message', 'typing', 'webrtc_ice_candidate']);
+      const max = fastEvents.has(event) ? 120 : 30;
+      const windowMs = fastEvents.has(event) ? 60_000 : 60_000;
+      if (isSocketRateLimited(sId, event, max, windowMs)) {
+        socket.emit('system_message', { text: 'SYS_ERR: Rate limit exceeded.' });
+        return;
+      }
+      next();
+    });
+
     socket.on('register_node', (data) => {
+      if (data?.token && socketAuthUser && data.token !== socketToken) {
+        return socket.emit('system_message', { text: 'SYS_ERR: Socket auth token mismatch.' });
+      }
       const user = registerUser(sId, data);
       syncUserState(sId);
       
@@ -380,14 +526,25 @@ async function startServer() {
       if (user?.currentRoom && user.socketId === sId) terminateChat(user.currentRoom);
     });
 
-    socket.on('spend_points', (data) => {
+    socket.on('spend_points', (data, ack) => {
        const user = socketToUser.get(sId);
-       if (user && user.points >= data.amount) {
-           user.points -= data.amount;
+       const type = typeof data?.type === 'string' ? data.type : '';
+       const cost = SPEND_COSTS[type];
+       if (user && cost && user.points >= cost) {
+           user.points -= cost;
+           if (type === 'voice' || type === 'video') {
+             user.unlocked = { ...(user.unlocked || {}), [type]: true };
+             if (user.currentRoom) {
+               socket.to(user.currentRoom).emit('partner_unlocked_feature', { feature: type });
+             }
+           }
            if (!user.isGuest) {
                db.prepare('UPDATE users SET points = ? WHERE id = ?').run(user.points, user.nodeId);
            }
            syncUserState(sId);
+           if (typeof ack === 'function') ack({ ok: true, points: user.points });
+       } else if (typeof ack === 'function') {
+           ack({ ok: false, error: 'INSUFFICIENT_FUNDS_OR_INVALID_SPEND' });
        }
     });
 
@@ -419,6 +576,9 @@ async function startServer() {
     });
 
     socket.on('join_pool', (data) => {
+      if (data?.token && socketAuthUser && data.token !== socketToken) {
+        return socket.emit('system_message', { text: 'SYS_ERR: Socket auth token mismatch.' });
+      }
       const userData = registerUser(sId, data);
       userData.freq = data.freq;
 
@@ -530,6 +690,24 @@ async function startServer() {
       }
     });
 
+    socket.on('boost_message', (data, ack) => {
+      const user = socketToUser.get(sId);
+      if (!user || !user.currentRoom) return typeof ack === 'function' && ack({ ok: false, error: 'NO_ACTIVE_ROOM' });
+      const allowedBoosts: Record<string, string> = { highlight: 'boost_highlight', glitch: 'boost_glitch', redact: 'boost_redact' };
+      const spendType = allowedBoosts[data?.type];
+      const cost = spendType ? SPEND_COSTS[spendType] : 0;
+      if (!cost || user.points < cost || typeof data?.messageId !== 'string') {
+        return typeof ack === 'function' && ack({ ok: false, error: 'INSUFFICIENT_FUNDS_OR_INVALID_BOOST' });
+      }
+      user.points -= cost;
+      if (!user.isGuest) {
+        db.prepare('UPDATE users SET points = ? WHERE id = ?').run(user.points, user.nodeId);
+      }
+      syncUserState(sId);
+      io.to(user.currentRoom).emit('message_updated', { messageId: data.messageId, boost: data.type });
+      if (typeof ack === 'function') ack({ ok: true, points: user.points });
+    });
+
      socket.on('extend_chat_timer', (data) => {
        const user = socketToUser.get(sId);
        if (!user || !user.currentRoom) return;
@@ -580,20 +758,51 @@ async function startServer() {
 
     socket.on('unlock_feature', (data) => {
       const user = socketToUser.get(sId);
-      if (user && user.currentRoom) {
+      if (user && user.currentRoom && user.unlocked?.[data?.feature]) {
         socket.to(user.currentRoom).emit('partner_unlocked_feature', data);
       }
     });
 
-    socket.on('mining_complete', (data) => {
+    socket.on('mining_complete', (_data, ack) => {
        const user = socketToUser.get(sId);
-       if (user && data.amount > 0 && data.amount <= 100) { // arbitrary cap to prevent abuse
-          user.points += data.amount;
+       const now = Date.now();
+       if (user && now - user.lastAdClaimedAt >= MINING_COOLDOWN_MS) {
+          user.lastAdClaimedAt = now;
+          user.points += MINING_REWARD;
           if (!user.isGuest) {
              db.prepare('UPDATE users SET points = ? WHERE id = ?').run(user.points, user.nodeId);
           }
           syncUserState(sId);
+          if (typeof ack === 'function') ack({ ok: true, points: user.points, amount: MINING_REWARD });
+       } else if (typeof ack === 'function') {
+          ack({ ok: false, error: 'MINING_COOLDOWN' });
        }
+    });
+
+    socket.on('report_partner', (data, ack) => {
+      const user = socketToUser.get(sId);
+      if (!user || !user.lastPartnerId) return typeof ack === 'function' && ack({ ok: false, error: 'NO_PARTNER' });
+      const partner = socketToUser.get(user.lastPartnerId);
+      if (!partner) return typeof ack === 'function' && ack({ ok: false, error: 'PARTNER_OFFLINE' });
+      const reason = typeof data?.reason === 'string' ? data.reason.trim().slice(0, 500) : 'unspecified';
+      db.prepare('INSERT INTO reports (id, reporter_id, reported_id, reason, room_id) VALUES (?, ?, ?, ?, ?)').run(
+        crypto.randomUUID(),
+        user.nodeId,
+        partner.nodeId,
+        reason,
+        user.currentRoom || ''
+      );
+      if (typeof ack === 'function') ack({ ok: true });
+    });
+
+    socket.on('block_partner', (_data, ack) => {
+      const user = socketToUser.get(sId);
+      if (!user || !user.lastPartnerId) return typeof ack === 'function' && ack({ ok: false, error: 'NO_PARTNER' });
+      const partner = socketToUser.get(user.lastPartnerId);
+      if (!partner) return typeof ack === 'function' && ack({ ok: false, error: 'PARTNER_OFFLINE' });
+      db.prepare('INSERT OR IGNORE INTO blocks (blocker_id, blocked_id) VALUES (?, ?)').run(user.nodeId, partner.nodeId);
+      if (user.currentRoom) terminateChat(user.currentRoom);
+      if (typeof ack === 'function') ack({ ok: true });
     });
   });
 

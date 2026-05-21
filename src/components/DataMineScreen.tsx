@@ -13,6 +13,7 @@ function cn(...inputs: ClassValue[]) {
 export function DataMineScreen({ onBack }: { onBack: () => void }) {
   const [miningState, setMiningState] = useState<'idle' | 'mining' | 'success'>('idle');
   const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (miningState === 'mining') {
@@ -26,9 +27,20 @@ export function DataMineScreen({ onBack }: { onBack: () => void }) {
 
         if (elapsed >= duration) {
           clearInterval(timer);
-          setMiningState('success');
-          socketService.emit('mining_complete', { amount: 50 });
-          audioService.playAlert();
+          socketService.emitWithAck<{ ok: boolean; error?: string }>('mining_complete', {})
+            .then(result => {
+              if (result.ok) {
+                setMiningState('success');
+                audioService.playAlert();
+              } else {
+                setError(result.error || 'EXTRACTION_REJECTED');
+                setMiningState('idle');
+              }
+            })
+            .catch(() => {
+              setError('CORE_UNREACHABLE');
+              setMiningState('idle');
+            });
         }
       }, interval);
 
@@ -64,10 +76,16 @@ export function DataMineScreen({ onBack }: { onBack: () => void }) {
             <p className="font-fa text-sm opacity-70 leading-relaxed mb-8">
                برای کسب امتیازات بیشتر در شبکه، می‌توانید به جریان‌های رمزنگاری شده خارجی متصل شوید و داده استخراج کنید. این فرآیند ممکن است ۱۵ ثانیه طول بکشد.
             </p>
+            {error && (
+              <div className="mb-4 border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-mono text-red-500">
+                SYS_ERR: {error}
+              </div>
+            )}
 
             <button 
               onClick={() => {
                  audioService.playKeystroke();
+                 setError('');
                  setMiningState('mining');
               }}
               className="border-2 border-[var(--phos-color)] bg-[var(--phos-color)]/10 px-8 py-4 uppercase tracking-[0.2em] font-mono text-sm hover:bg-[var(--phos-color)] hover:text-black hover:shadow-[0_0_20px_var(--phos-color)] transition-all font-bold w-full"

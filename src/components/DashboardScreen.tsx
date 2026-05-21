@@ -10,7 +10,25 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function DashboardScreen({ onFindConnection, onDataMine, reputation, atmosphere, voidMessages = [] }: { onFindConnection: () => void, onDataMine: () => void, reputation: { positive: number, negative: number }, atmosphere: any, voidMessages?: any[] }) {
+export function DashboardScreen({
+  onFindConnection,
+  onDataMine,
+  onEditProfile,
+  onLogout,
+  onDeleteAccount,
+  reputation,
+  atmosphere,
+  voidMessages = []
+}: {
+  onFindConnection: () => void,
+  onDataMine: () => void,
+  onEditProfile: () => void,
+  onLogout: () => void,
+  onDeleteAccount?: () => void,
+  reputation: { positive: number, negative: number },
+  atmosphere: any,
+  voidMessages?: any[]
+}) {
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -215,6 +233,28 @@ export function DashboardScreen({ onFindConnection, onDataMine, reputation, atmo
              <span className="font-fa text-[10px] sm:text-xs text-[var(--phos-color)]/50 mt-1">استخراج داده (تماشای تبلیغ) - کسب امتیاز ۵۰+</span>
            </div>
          </button>
+         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-6">
+           <button
+             onClick={() => { audioService.playKeystroke(); onEditProfile(); }}
+             className="border border-[var(--phos-color)]/30 px-3 py-2 text-[10px] uppercase tracking-widest hover:bg-[var(--phos-color)]/10"
+           >
+             EDIT_PROFILE
+           </button>
+           <button
+             onClick={() => { audioService.playKeystroke(); onLogout(); }}
+             className="border border-[var(--phos-color)]/30 px-3 py-2 text-[10px] uppercase tracking-widest hover:bg-[var(--phos-color)]/10"
+           >
+             LOGOUT
+           </button>
+           {onDeleteAccount && (
+             <button
+               onClick={() => { audioService.playKeystroke(); onDeleteAccount(); }}
+               className="border border-red-500/40 text-red-500 px-3 py-2 text-[10px] uppercase tracking-widest hover:bg-red-500/10"
+             >
+               DELETE_ACCOUNT
+             </button>
+           )}
+         </div>
       </div>
 
       <div className="mt-6 text-center opacity-40 px-4 pb-6">
